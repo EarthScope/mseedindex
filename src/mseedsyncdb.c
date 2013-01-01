@@ -36,6 +36,11 @@
  * modified 2012.365
  ***************************************************************************/
 
+
+// Need man page
+
+// synching to DB with updates for unchanges segments.
+
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>

@@ -1,0 +1,69 @@
+.TH MSEEDSYNCDB 1 2013/01/02
+.SH NAME
+Synchronize Mini-SEED with database schema
+
+.SH SYNOPSIS
+.nf
+mseedsyncdb [options] file1 [file2 file3 ...]
+
+.fi
+.SH DESCRIPTION
+\fBmseedsyncdb\fP reads Mini-SEED, determines contiguous time series
+represented and synchronizes the information with a database.
+
+
+When a input file is full SEED including both SEED headers and data
+records all of the headers will be skipped.
+
+.SH OPTIONS
+
+.IP "-V         "
+Print program version and exit.
+
+.IP "-h         "
+Print program usage and exit.
+
+.IP "-ns        "
+No synchronization.  Read miniSEED, determine data representation but
+do not synchronize the time series information with the database.
+
+.IP "-C \fIconninfo\fP"
+Specify the database connection information parameters.  For example:
+.nf
+"host=postdb dbname=timeseries user=timeseries"
+.fi
+
+.IP "-tt \fIsecs\fP"
+Specify a time tolerance for constructing continous trace
+segments. The tolerance is specified in seconds.  The default
+tolerance is 1/2 of the sample period.
+
+.IP "-rt \fIdiff\fP"
+Specify a sample rate tolerance for constructing continous trace
+segments. The tolerance is specified as the difference between two
+sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) <
+0.0001).
+
+.SH "INPUT LIST FILE"
+A list file can be used to specify input files, one file per line.
+The initial '@' character indicating a list file is not considered
+part of the file name.  As an example, if the following command line
+option was used:
+
+.nf
+\fB@files.list\fP
+.fi
+
+The 'files.list' file might look like this:
+
+.nf
+data/day1.mseed
+data/day2.mseed
+data/day3.mseed
+.fi
+
+.SH AUTHOR
+.nf
+Chad Trabant
+IRIS Data Management Center
+.fi

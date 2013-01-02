@@ -36,7 +36,6 @@
  * modified 2012.365
  ***************************************************************************/
 
-
 // Need man page
 
 // synching to DB with updates for unchanges segments.

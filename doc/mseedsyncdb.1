@@ -23,9 +23,15 @@ Print program version and exit.
 .IP "-h         "
 Print program usage and exit.
 
+.IP "-v         "
+Be more verbose.  This flag can be used multiple times ("-v -v" or
+"-vv") for more verbosity.
+
 .IP "-ns        "
 No synchronization.  Read miniSEED, determine data representation but
 do not synchronize the time series information with the database.
+Typically this would be used during diagnostics or testing and in
+combination the verbose option to print the time series information.
 
 .IP "-C \fIconninfo\fP"
 Specify the database connection information parameters.  For example:

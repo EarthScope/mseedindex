@@ -84,7 +84,7 @@ struct filelink {
 struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
-static void syncfileseries (struct filelink *flp);
+static void syncfileseries (struct filelink *flp, time_t scantime);
 static int processparam (int argcount, char **argvec);
 static char *getoptval (int argcount, char **argvec, int argopt);
 static int addfile (char *filename);
@@ -101,6 +101,7 @@ main (int argc, char **argv)
   MSTrace *cmst = NULL;
   hptime_t endtime = HPTERROR;
   int retcode = MS_NOERROR;
+  time_t scantime;
   
   off_t filepos = 0;
   off_t prevfilepos = 0;
@@ -153,6 +154,8 @@ main (int argc, char **argv)
       
       flp->mstg = mst_initgroup (flp->mstg);
       cmst = NULL;
+      
+      scantime = time (NULL);
       
       /* Read records from the input file */
       while ( (retcode = ms_readmsr (&msr, flp->filename, -1, &filepos,
@@ -237,7 +240,7 @@ main (int argc, char **argv)
       ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
       
       /* Sync time series listing */
-      syncfileseries (flp);
+      syncfileseries (flp, scantime);
       
       flp = flp->next;
     } /* End of looping over file list */
@@ -262,26 +265,27 @@ main (int argc, char **argv)
  *
  * Expected database schema:
  *
- * Field Name       Type
- * ---------------- ------------
- * NETWORK	    VARCHAR2(2)
- * STATION	    VARCHAR2(5)
- * LOCATION	    VARCHAR2(2)
- * CHANNEL	    VARCHAR2(3)
- * QUALITY	    VARCHAR2(1)
- * STARTTIME	    TIMESTAMP(4)
- * ENDTIME	    TIMESTAMP(4)
- * SAMPLERATE	    NUMBER(8,3)
- * FILENAME	    VARCHAR2(256)
- * OFFSET 	    NUMBER(19)
- * BYTES	    NUMBER(19)
- * HASH		    VARCHAR2(256)
- * UPDATED	    TIMESTAMP(4)
+ * Field Name   Type
+ * ------------ ------------
+ * network	character varying(2)
+ * station	character varying(5)
+ * location	character varying(2)
+ * channel	character varying(3)
+ * quality	character varying(1)
+ * starttime	timestamp(6) without time zone
+ * endtime	timestamp(6) without time zone
+ * samplerate	numeric(8,3)
+ * filename	character varying(256)
+ * offset	numeric(19,0)
+ * bytes	numeric(19,0)
+ * hash		character varying(256)
+ * updated	timestamp without time zone
+ * scanned	timestamp without time zone
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static void
-syncfileseries (struct filelink *flp)
+syncfileseries (struct filelink *flp, time_t scantime)
 {
   struct segdetails *sd;
   MSTrace *mst = NULL;
@@ -319,11 +323,12 @@ syncfileseries (struct filelink *flp)
       bytecount = sd->endoffset - sd->startoffset + 1;
       
       /* Print trace line */
-      ms_log (0, "%s|%s|%s|%s|%.1s|%s|%s|%.10g|%s|%lld|%lld|%s\n",
+      ms_log (0, "%s|%s|%s|%s|%.1s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld\n",
 	      mst->network, mst->station, mst->location, mst->channel,
 	      (mst->dataquality) ? &(mst->dataquality) : "",
 	      starttime, endtime, mst->samprate, flp->filename,
-	      sd->startoffset, bytecount, digeststr);
+	      sd->startoffset, bytecount, digeststr,
+	      (long long int) scantime);
       
       mst = mst->next;
     }

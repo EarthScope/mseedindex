@@ -11,21 +11,22 @@
  * 
  * Expected database schema:
  *
- * Field Name       Type
- * ---------------- ------------
- * NETWORK	    VARCHAR2(2)
- * STATION	    VARCHAR2(5)
- * LOCATION	    VARCHAR2(2)
- * CHANNEL	    VARCHAR2(3)
- * QUALITY	    VARCHAR2(1)
- * STARTTIME	    TIMESTAMP(4)
- * ENDTIME	    TIMESTAMP(4)
- * SAMPLERATE	    NUMBER(8,3)
- * FILENAME	    VARCHAR2(256)
- * OFFSET 	    NUMBER(19)
- * BYTES	    NUMBER(19)
- * HASH		    VARCHAR2(256)
- * UPDATED	    TIMESTAMP(4)
+ * Field Name   Type
+ * ------------ ------------
+ * network	character varying(2)
+ * station	character varying(5)
+ * location	character varying(2)
+ * channel	character varying(3)
+ * quality	character varying(1)
+ * starttime	timestamp(6) without time zone
+ * endtime	timestamp(6) without time zone
+ * samplerate	numeric(8,3)
+ * filename	character varying(256)
+ * offset	numeric(19,0)
+ * bytes	numeric(19,0)
+ * hash		character varying(256)
+ * updated	timestamp without time zone
+ * scanned	timestamp without time zone
  *
  * In general critical error messages are prefixed with "ERROR:" and
  * the return code will be 1.  On successfull operation the return
@@ -33,12 +34,14 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2012.365
+ * modified 2013.009
  ***************************************************************************/
 
 // Need man page
 
-// synching to DB with updates for unchanges segments.
+// synching to DB with updates for unchanges segments
+
+// need to handle authenticated request filtering
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -63,7 +66,7 @@ static double  timetol      = -1.0; /* Time tolerance for continuous traces */
 static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous traces */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
-static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries";
+static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries pass=timeseries";
 static PGconn *dbconn       = NULL; /* Database connection */
 
 struct segdetails {

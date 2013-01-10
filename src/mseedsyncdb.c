@@ -66,7 +66,7 @@ static double  timetol      = -1.0; /* Time tolerance for continuous traces */
 static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous traces */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
-static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries pass=timeseries";
+static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries password=timeseries";
 static PGconn *dbconn       = NULL; /* Database connection */
 
 struct segdetails {

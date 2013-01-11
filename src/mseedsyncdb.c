@@ -34,14 +34,12 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2013.009
+ * modified 2013.010
  ***************************************************************************/
 
-// Need man page
+// synching to DB
 
-// synching to DB with updates for unchanges segments
-
-// need to handle authenticated request filtering
+// Handling of versioned files, with file#<version>, document in man page
 
 #include <stdio.h>
 #include <stdlib.h>
@@ -84,7 +82,7 @@ struct filelink {
 struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
-static void syncfileseries (struct filelink *flp, time_t scantime);
+static int syncfileseries (struct filelink *flp, time_t scantime);
 static int processparam (int argcount, char **argvec);
 static char *getoptval (int argcount, char **argvec, int argopt);
 static int addfile (char *filename);
@@ -159,7 +157,7 @@ main (int argc, char **argv)
       
       /* Read records from the input file */
       while ( (retcode = ms_readmsr (&msr, flp->filename, -1, &filepos,
-				     NULL, 1, 0, verbose)) == MS_NOERROR )
+				     NULL, 1, 0, verbose-1)) == MS_NOERROR )
 	{
 	  mst = NULL;
 	  whence = 0;
@@ -240,7 +238,11 @@ main (int argc, char **argv)
       ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
       
       /* Sync time series listing */
-      syncfileseries (flp, scantime);
+      if ( syncfileseries (flp, scantime) )
+	{
+	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
+	  exit (1);
+	}
       
       flp = flp->next;
     } /* End of looping over file list */
@@ -249,7 +251,7 @@ main (int argc, char **argv)
     {
       if ( verbose >= 2 )
 	ms_log (1, "Closing database connection to %s\n", PQhost(dbconn));
-
+      
       PQfinish (dbconn);
     }
   
@@ -284,27 +286,119 @@ main (int argc, char **argv)
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
-static void
+static int
 syncfileseries (struct filelink *flp, time_t scantime)
 {
+  PGresult *res = NULL;
+  PGresult *matchres = NULL;
   struct segdetails *sd;
   MSTrace *mst = NULL;
+  int64_t bytecount;
   char starttime[30];
   char endtime[30];
-  int64_t bytecount;
+  char query[1024];
+  int baselength = 0;
+  int length;
+  
+  char *vp;
+  char *ep = NULL;
+  double version = -1.0;
   
   md5_byte_t digest[16];
   char digeststr[33];
   int idx;
-
+  
   if ( ! flp )
-    return;
+    return -1;
   
-  // Chad, sync with database, use transactions.
-  // Check for nosync and print when verbose
+  if ( verbose )
+    ms_log (0, "Synchronizing segments for %s\n", flp->filename);
   
-  /* Print header line */
-  ms_log (0, "%s:\n", flp->filename);
+  /* Check and parse version from file */
+  if ( (vp = strrchr (flp->filename, '#')) )
+    {
+      baselength = vp - flp->filename;
+      
+      version = strtod (++vp, &ep);
+      
+      if ( ! version && vp == ep )
+	{
+	  ms_log (2, "Error parsing version from %s\n", flp->filename);
+	  return -1;
+	}
+      
+      if ( verbose >= 2 )
+	ms_log (1, "Parsed version %g from %s\n", version, flp->filename);
+    }
+  
+  /* Search database for rows matching the filename or a version of the filename. */
+  if ( dbconn )
+    {
+      if ( baselength > 0 )
+	{
+	  length = snprintf (query, sizeof(query),
+			     "select network,station,location,channel,quality,"
+			     "extract (epoch from starttime),extract (epoch from endtime),"
+			     "filename,hash,extract (epoch from updated) "
+			     "from timeseries "
+			     "where filename like '%.*s%%'", baselength, flp->filename);
+	  
+	  if ( verbose >= 2 )
+	    ms_log (1, "Searching for rows matching '%.*s%%'\n", baselength, flp->filename);
+	}
+      else
+	{
+	  length = snprintf (query, sizeof(query),
+			     "select network,station,location,channel,quality,"
+			     "extract (epoch from starttime),extract (epoch from endtime),"
+			     "filename,hash,extract (epoch from updated) "
+			     "from timeseries "
+			     "where filename='%s'", flp->filename);
+	  
+	  if ( verbose >= 2 )
+	    ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
+	}
+      
+      if ( verbose >= 3 )
+	fprintf (stderr, "QUERY(%d): '%s'\n", length, query);
+      
+      if ( length > sizeof(query) )
+	{
+	  ms_log (2, "Query for rows matching '%s' was truncated! Needed %d bytes.\n",
+		  flp->filename, length);
+	  return -1;
+	}
+      
+      matchres = PQexec (dbconn, query);
+      if ( PQresultStatus(matchres) != PGRES_TUPLES_OK )
+	{
+	  fprintf (stderr, "SELECT query failed: %s\n", query);
+	  PQclear (matchres);
+	  return -1;
+	}
+      
+      if ( verbose >= 2 )
+	ms_log (1, "Found %d matching rows\n", PQntuples(res));
+      
+      if ( 1 )
+	{
+	  
+	  
+	}
+
+      //CHAD, check for existing rows that match filename[#version]
+      
+      /* Start a transaction block */
+      res = PQexec (dbconn, "BEGIN");
+      if ( PQresultStatus(res) != PGRES_COMMAND_OK )
+	{
+	  ms_log (2, "BEGIN command failed: %s", PQerrorMessage(dbconn));
+	  PQclear (res);
+	  return -1;
+	}
+      
+      //CHAD, delete existing rows that match filename[#version] if any
+    }
   
   /* Loop through trace list */
   mst = flp->mstg->traces;
@@ -315,25 +409,43 @@ syncfileseries (struct filelink *flp, time_t scantime)
       ms_hptime2seedtimestr (mst->starttime, starttime, 1);
       ms_hptime2seedtimestr (mst->endtime, endtime, 1);
       
-      /* Calculate MD5 digest and string */
+      /* Calculate MD5 digest and string representation */
       md5_finish(&(sd->digeststate), digest);
       for (idx=0; idx < 16; idx++)
 	sprintf (digeststr+(idx*2), "%02x", digest[idx]);
       
       bytecount = sd->endoffset - sd->startoffset + 1;
       
-      /* Print trace line */
-      ms_log (0, "%s|%s|%s|%s|%.1s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld\n",
-	      mst->network, mst->station, mst->location, mst->channel,
-	      (mst->dataquality) ? &(mst->dataquality) : "",
-	      starttime, endtime, mst->samprate, flp->filename,
-	      sd->startoffset, bytecount, digeststr,
-	      (long long int) scantime);
+      if ( dbconn )
+	{
+	  //CHAD, check if hash is the same as matching rows and retain updated date if they
+	  
+	  //CHAD, insert row
+	}
       
+      /* Print trace line when verbose >=2 or when verbose and nosync */
+      if ( verbose >= 2 || (verbose && nosync) )
+	ms_log (0, "%s|%s|%s|%s|%.1s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld\n",
+		mst->network, mst->station, mst->location, mst->channel,
+		(mst->dataquality) ? &(mst->dataquality) : "",
+		starttime, endtime, mst->samprate, flp->filename,
+		sd->startoffset, bytecount, digeststr,
+		(long long int) scantime);
+
       mst = mst->next;
     }
   
-  return;
+  /* End the transaction */
+  if ( dbconn )
+    {
+      res = PQexec (dbconn, "END");
+      PQclear(res);
+      
+      if ( matchres )
+	PQclear (matchres);
+    }
+  
+  return 0;
 }  /* End of syncfileseries() */
 
 

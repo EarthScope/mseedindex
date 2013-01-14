@@ -2,7 +2,7 @@
  * mseedsyncdb.c - Synchronize Mini-SEED with database schema
  *
  * Opens user specified file(s), parses the Mini-SEED records and
- * synchronizes time series summary with database schema.
+ * synchronizes time series summary with PostgreSQL database schema.
  *
  * The time series are grouped by continuous segments of series
  * composed of contiguous records in a given file.  The result is that
@@ -34,12 +34,10 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2013.012
+ * modified 2013.014
  ***************************************************************************/
 
-// synching to DB
-
-// Handling of versioned files, with file#<version>, document in man page
+// Enforce increasing version number for data files?
 
 #include <stdio.h>
 #include <stdlib.h>

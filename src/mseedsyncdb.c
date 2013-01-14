@@ -20,11 +20,11 @@
  * quality	character varying(1)
  * starttime	timestamp(6) without time zone
  * endtime	timestamp(6) without time zone
- * samplerate	numeric(8,3)
+ * samplerate	numeric(10,6)
  * filename	character varying(256)
- * offset	numeric(19,0)
- * bytes	numeric(19,0)
- * hash		character varying(256)
+ * offset	numeric(15,0)
+ * bytes	numeric(15,0)
+ * hash		character varying(64)
  * updated	timestamp without time zone
  * scanned	timestamp without time zone
  *
@@ -34,7 +34,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2013.010
+ * modified 2013.012
  ***************************************************************************/
 
 // synching to DB
@@ -43,6 +43,7 @@
 
 #include <stdio.h>
 #include <stdlib.h>
+#include <stdarg.h>
 #include <string.h>
 #include <time.h>
 #include <errno.h>
@@ -83,6 +84,7 @@ struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
 static int syncfileseries (struct filelink *flp, time_t scantime);
+static PGresult *pquery (PGconn *pgdb, const char *format, ...);
 static int processparam (int argcount, char **argvec);
 static char *getoptval (int argcount, char **argvec, int argopt);
 static int addfile (char *filename);
@@ -92,6 +94,7 @@ static void usage (void);
 int
 main (int argc, char **argv)
 {
+  PGresult *result = NULL;
   struct segdetails *sd = NULL;
   struct filelink *flp = NULL;
   MSRecord *msr = NULL;
@@ -142,6 +145,19 @@ main (int argc, char **argv)
 		  PQdb(dbconn), PQhost(dbconn),
 		  major, minor, less);
 	}
+      
+      /* Set session timezone to 'UTC' */
+      result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
+      if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+	{
+	  fprintf (stderr, "SET timezone command failed: %s", PQerrorMessage(dbconn));
+	  PQclear (result);
+	  exit(1);
+	}
+      PQclear (result);
+      
+      if ( verbose )
+	ms_log (1, "Set database session timezone to UTC\n");
     }
   
   flp = filelist;
@@ -276,11 +292,11 @@ main (int argc, char **argv)
  * quality	character varying(1)
  * starttime	timestamp(6) without time zone
  * endtime	timestamp(6) without time zone
- * samplerate	numeric(8,3)
+ * samplerate	numeric(10,6)
  * filename	character varying(256)
- * offset	numeric(19,0)
- * bytes	numeric(19,0)
- * hash		character varying(256)
+ * offset	numeric(15,0)
+ * bytes	numeric(15,0)
+ * hash		character varying(64)
  * updated	timestamp without time zone
  * scanned	timestamp without time zone
  *
@@ -289,16 +305,15 @@ main (int argc, char **argv)
 static int
 syncfileseries (struct filelink *flp, time_t scantime)
 {
-  PGresult *res = NULL;
-  PGresult *matchres = NULL;
+  PGresult *result = NULL;
+  PGresult *matchresult = NULL;
   struct segdetails *sd;
   MSTrace *mst = NULL;
   int64_t bytecount;
   char starttime[30];
   char endtime[30];
-  char query[1024];
+  char *filewhere = NULL;
   int baselength = 0;
-  int length;
   
   char *vp;
   char *ep = NULL;
@@ -331,73 +346,74 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	ms_log (1, "Parsed version %g from %s\n", version, flp->filename);
     }
   
-  /* Search database for rows matching the filename or a version of the filename. */
+  /* Search database for rows matching the filename or a version of the filename */
   if ( dbconn )
     {
       if ( baselength > 0 )
-	{
-	  length = snprintf (query, sizeof(query),
-			     "select network,station,location,channel,quality,"
-			     "extract (epoch from starttime),extract (epoch from endtime),"
-			     "filename,hash,extract (epoch from updated) "
-			     "from timeseries "
-			     "where filename like '%.*s%%'", baselength, flp->filename);
-	  
-	  if ( verbose >= 2 )
-	    ms_log (1, "Searching for rows matching '%.*s%%'\n", baselength, flp->filename);
-	}
+	asprintf (&filewhere, "filename like '%.*s%%'", baselength, flp->filename);
       else
-	{
-	  length = snprintf (query, sizeof(query),
-			     "select network,station,location,channel,quality,"
-			     "extract (epoch from starttime),extract (epoch from endtime),"
-			     "filename,hash,extract (epoch from updated) "
-			     "from timeseries "
-			     "where filename='%s'", flp->filename);
-	  
-	  if ( verbose >= 2 )
-	    ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
-	}
+	asprintf (&filewhere, "filename='%s'", flp->filename);
       
-      if ( verbose >= 3 )
-	fprintf (stderr, "QUERY(%d): '%s'\n", length, query);
-      
-      if ( length > sizeof(query) )
+      if ( ! filewhere )
 	{
-	  ms_log (2, "Query for rows matching '%s' was truncated! Needed %d bytes.\n",
-		  flp->filename, length);
-	  return -1;
-	}
-      
-      matchres = PQexec (dbconn, query);
-      if ( PQresultStatus(matchres) != PGRES_TUPLES_OK )
-	{
-	  fprintf (stderr, "SELECT query failed: %s\n", query);
-	  PQclear (matchres);
+	  ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
 	  return -1;
 	}
       
       if ( verbose >= 2 )
-	ms_log (1, "Found %d matching rows\n", PQntuples(res));
+	ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
       
-      if ( 1 )
-	{
-	  
-	  
-	}
-
-      //CHAD, check for existing rows that match filename[#version]
+      matchresult = pquery (dbconn,
+			    "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
+			    "FROM timeseries "
+			    "WHERE %s", filewhere);
       
-      /* Start a transaction block */
-      res = PQexec (dbconn, "BEGIN");
-      if ( PQresultStatus(res) != PGRES_COMMAND_OK )
+      if ( PQresultStatus(matchresult) != PGRES_TUPLES_OK )
 	{
-	  ms_log (2, "BEGIN command failed: %s", PQerrorMessage(dbconn));
-	  PQclear (res);
+	  ms_log (2, "SELECT failed: %s\n", PQresultErrorMessage(matchresult));
+	  PQclear (matchresult);
+	  if ( filewhere )
+	    free (filewhere);
 	  return -1;
 	}
       
-      //CHAD, delete existing rows that match filename[#version] if any
+      if ( verbose >= 2 )
+	ms_log (1, "Found %d matching rows\n", PQntuples(matchresult));
+      
+      if ( PQntuples(matchresult) <= 0 )
+	{
+	  PQclear (matchresult);
+	  matchresult = NULL;
+	}
+      
+      /* Start a transaction block */
+      result = PQexec (dbconn, "BEGIN");
+      if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+	{
+	  fprintf (stderr, "BEGIN command failed: %s", PQerrorMessage(dbconn));
+	  PQclear (result);
+	  if ( filewhere )
+	    free (filewhere);
+	  return -1;
+	}
+      PQclear (result);
+      
+      /* Delete existing rows for filename or previous version of filename */
+      if ( PQntuples(matchresult) > 0 )
+	{
+	  result = pquery (dbconn, "DELETE FROM timeseries WHERE %s", filewhere);
+	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+	    {
+	      fprintf (stderr, "DELETE failed: %s", PQerrorMessage(dbconn));
+	      PQclear (result);
+	      if ( filewhere )
+		free (filewhere);
+	      return -1;
+	    }
+	  PQclear (result);
+	}
+      
+      free (filewhere);
     }
   
   /* Loop through trace list */
@@ -418,9 +434,50 @@ syncfileseries (struct filelink *flp, time_t scantime)
       
       if ( dbconn )
 	{
-	  //CHAD, check if hash is the same as matching rows and retain updated date if they
+	  int64_t updated = (int64_t) scantime;
+          char *qp;
 	  
-	  //CHAD, insert row
+	  /* Search for matching trace entry to retain updated time if hash has not changed */
+	  if ( matchresult )
+	    {
+	      /* Fields: 0=net,1=sta,2=loc,3=chan,4=qual,5=hash,6=updated */
+	      for ( idx=0; idx < PQntuples(matchresult); idx++ )
+		{
+                  qp = PQgetvalue(matchresult, idx, 4);
+
+		  if ( ! strcmp (digeststr, PQgetvalue(matchresult, idx, 5)) )
+		    if ( mst->dataquality == *qp ) 
+		      if ( ! strcmp (mst->channel, PQgetvalue(matchresult, idx, 3))) 
+			if ( ! strcmp (mst->location, PQgetvalue(matchresult, idx, 2)) )
+			  if ( ! strcmp (mst->station, PQgetvalue(matchresult, idx, 1)) )
+			    if ( ! strcmp (mst->network, PQgetvalue(matchresult, idx, 0)) )
+			      {
+				updated = strtoll (PQgetvalue(matchresult, idx, 6), NULL, 10);
+			      }
+		}
+	    }
+	  
+	  /* Insert new row */
+	  result = pquery (dbconn,
+			   "INSERT INTO timeseries "
+			   "(network,station,location,channel,quality,starttime,endtime,samplerate,filename,byteoffset,bytes,hash,updated,scanned) "
+			   "VALUES "
+			   "('%s','%s','%s','%s','%.1s',"
+			   "to_timestamp(%.6f),to_timestamp(%.6f),"
+			   "%.6g,'%s',%lld,%lld,'%s',to_timestamp(%lld),to_timestamp(%lld))",
+			   mst->network, mst->station, mst->location, mst->channel, (mst->dataquality) ? &(mst->dataquality) : "",
+			   (double) MS_HPTIME2EPOCH(mst->starttime), (double) MS_HPTIME2EPOCH(mst->endtime),
+			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
+			   (long long int) updated, (long long int) scantime
+			   );
+	  
+	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+	    {
+	      fprintf (stderr, "INSERT failed: %s\n", PQresultErrorMessage(result));
+	      PQclear (result);
+	      return -1;
+	    }
+	  PQclear (result);
 	}
       
       /* Print trace line when verbose >=2 or when verbose and nosync */
@@ -438,15 +495,52 @@ syncfileseries (struct filelink *flp, time_t scantime)
   /* End the transaction */
   if ( dbconn )
     {
-      res = PQexec (dbconn, "END");
-      PQclear(res);
+      result = PQexec (dbconn, "END");
+      PQclear(result);
       
-      if ( matchres )
-	PQclear (matchres);
+      if ( matchresult )
+	PQclear (matchresult);
     }
   
   return 0;
 }  /* End of syncfileseries() */
+
+
+/***************************************************************************
+ * pquery():
+ *
+ * Execute a query to the Postgres DB connection at 'pgdb'.
+ *
+ * Returns PGresult on success and NULL on failure
+ ***************************************************************************/
+static PGresult *
+pquery (PGconn *pgdb, const char *format, ...)
+{
+  va_list argv;
+  char *query = NULL;
+  PGresult *result = NULL;
+  int length;
+  
+  va_start (argv, format);
+  length = vasprintf (&query, format, argv);
+  va_end (argv);
+  
+  if ( ! query || length <= 0 )
+    {
+      ms_log (2, "Cannot create query string\n");
+      return NULL;
+    }
+  
+  if ( verbose >= 3 )
+    fprintf (stderr, "QUERY(%d): '%s'\n", length, query);
+  
+  result = PQexec (pgdb, query);
+  
+  if ( query )
+    free (query);
+  
+  return result;
+}  /* End of pquery() */
 
 
 /***************************************************************************

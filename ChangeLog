@@ -1,2 +1,7 @@
+2013.308: 0.2
+	- Update libmseed to 2.12.
+	- Add -TRACE option to turn on libpq connection tracing.
+	- Add segment (trace) listing to verbose output.
+
 2013.014: 0.1
 	- Initial version.

@@ -34,7 +34,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2013.014
+ * modified 2013.308
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -55,7 +55,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.1"
+#define VERSION "0.2"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -64,8 +64,9 @@ static double  timetol      = -1.0; /* Time tolerance for continuous traces */
 static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous traces */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
-static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries password=timeseries";
 static PGconn *dbconn       = NULL; /* Database connection */
+static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries password=timeseries";
+static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
 
 struct segdetails {
   int64_t startoffset;
@@ -124,6 +125,11 @@ main (int argc, char **argv)
 	  ms_log (2, "PQconnectdb returned NULL, connection failed");
 	  exit (1);
 	}
+
+      if ( dbconntrace )
+	{
+          PQtrace (dbconn, stderr);
+        }
       
       if ( PQstatus(dbconn) != CONNECTION_OK )
 	{
@@ -251,7 +257,14 @@ main (int argc, char **argv)
       
       /* Make sure everything is cleaned up */
       ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
-      
+
+      /* Print segments for verbose output */
+      if ( verbose >= 2 )
+        {
+          ms_log (1, "Segment list to synchronize for %s\n", flp->filename);
+	  mst_printtracelist (flp->mstg, 1, 1, 0);	
+	}
+
       /* Sync time series listing */
       if ( syncfileseries (flp, scantime) )
 	{
@@ -266,7 +279,7 @@ main (int argc, char **argv)
     {
       if ( verbose >= 2 )
 	ms_log (1, "Closing database connection to %s\n", PQhost(dbconn));
-      
+
       PQfinish (dbconn);
     }
   
@@ -530,7 +543,7 @@ pquery (PGconn *pgdb, const char *format, ...)
       return NULL;
     }
   
-  if ( verbose >= 3 )
+  if ( verbose >= 2 )
     fprintf (stderr, "QUERY(%d): '%s'\n", length, query);
   
   result = PQexec (pgdb, query);
@@ -579,6 +592,10 @@ processparam (int argcount, char **argvec)
 	{
 	  dbconninfo = strdup (getoptval(argcount, argvec, optind++));
 	}
+      else if (strncmp (argvec[optind], "-TRACE", 6) == 0)
+        {
+          dbconntrace = 1;
+        }
       else if (strcmp (argvec[optind], "-tt") == 0)
 	{
 	  timetol = strtod (getoptval(argcount, argvec, optind++), NULL);
@@ -792,6 +809,7 @@ usage (void)
 	   "\n"
 	   " -C conninfo  Database connection parameters\n"
 	   "                currently: '%s'\n"
+           " -TRACE       Enable libpq tracing facility and direct output to stderr\n"
 	   "\n"
 	   " -tt secs     Specify a time tolerance for continuous traces\n"
 	   " -rt diff     Specify a sample rate tolerance for continuous traces\n"

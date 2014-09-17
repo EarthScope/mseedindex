@@ -1,5 +1,6 @@
 2013.260:
 	- Update libmseed to 2.13.
+	- Rearrange src/Makefile to tidy it up and avoid LDFLAGS collision.
 
 2013.308: 0.2
 	- Update libmseed to 2.12.

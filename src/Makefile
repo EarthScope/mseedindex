@@ -11,14 +11,14 @@ OBJS = $(SRCS:.c=.o)
 
 # Required compiler parameters
 REQCFLAGS = -I../libmseed
+REQLDFLAGS = -L../libmseed
 
-LDFLAGS = -L../libmseed
 LDLIBS = -lmseed -lpq
 
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o ../$@ $(OBJS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) -o ../$@ $(OBJS) $(REQLDFLAGS) $(LDFLAGS) $(LDLIBS)
 
 clean:
 	rm -f $(OBJS) ../$(BIN)

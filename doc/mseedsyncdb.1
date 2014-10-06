@@ -1,4 +1,4 @@
-.TH MSEEDSYNCDB 1 2013/01/14
+.TH MSEEDSYNCDB 1 2014/10/6
 .SH NAME
 Synchronize Mini-SEED with database schema
 
@@ -94,11 +94,20 @@ do not synchronize the time series information with the database.
 Typically this would be used during diagnostics or testing and in
 combination the verbose option to print the time series information.
 
-.IP "-C \fIconninfo\fP"
-Specify the database connection information parameters.  For example:
-.nf
-"host=postdb dbname=timeseries user=timeseries"
-.fi
+.IP "-table \fItablename\fP"
+Specify the database table name, default: timeseries
+
+.IP "-dbhost \fIhostname\fP"
+Specify the database host name, default: dbserv3
+
+.IP "-dbport \fIport\fP"
+Specify the database host name, default: 5444
+
+.IP "-dbuser \fIusername\fP"
+Specify the database user name, default: timeseries
+
+.IP "-dbpass \fIpassword\fP"
+Specify the database user password
 
 .IP "-tt \fIsecs\fP"
 Specify a time tolerance for constructing continous trace

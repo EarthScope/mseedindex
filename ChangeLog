@@ -1,3 +1,14 @@
+2013.279: 0.3
+	- Update to new schema using fields:
+	  * nslcq (ltree type for Net.Sta.Loc.Chan.Qual)
+	  * timerange (tstzrange type for inclusive start-end range)
+	- Add the following options:
+	  * -table: specify target table name, default is 'timeseries'
+	  * -dbhost: specify database host, default dbserv3
+	  * -dbport: specify database port, default 5444
+	  * -dbuser: specify database user name, default timeseries
+	  * -dbpass: specify database user password, default timeseries
+
 2013.260:
 	- Update libmseed to 2.13.
 	- Rearrange src/Makefile to tidy it up and avoid LDFLAGS collision.

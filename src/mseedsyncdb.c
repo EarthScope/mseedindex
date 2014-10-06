@@ -13,20 +13,15 @@
  *
  * Field Name   Type
  * ------------ ------------
- * network	character varying(2)
- * station	character varying(5)
- * location	character varying(2)
- * channel	character varying(3)
- * quality	character varying(1)
- * starttime	timestamp(6) without time zone
- * endtime	timestamp(6) without time zone
+ * nslcq	ltree
+ * timerange	tstzrange   [timestamps with time zone]
  * samplerate	numeric(10,6)
  * filename	character varying(256)
  * offset	numeric(15,0)
  * bytes	numeric(15,0)
  * hash		character varying(64)
- * updated	timestamp without time zone
- * scanned	timestamp without time zone
+ * updated	timestamp with time zone
+ * scanned	timestamp with time zone
  *
  * In general critical error messages are prefixed with "ERROR:" and
  * the return code will be 1.  On successfull operation the return
@@ -34,7 +29,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2013.308
+ * modified 2014.279
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -55,7 +50,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.2"
+#define VERSION "0.3"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -65,8 +60,13 @@ static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous trac
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
 static PGconn *dbconn       = NULL; /* Database connection */
-static char   *dbconninfo   = "host=postdb dbname=timeseries user=timeseries password=timeseries";
 static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
+static char   *dbhost       = "dbserv3";
+static char   *dbport       = "5444";
+static char   *dbname       = "iris";
+static char   *dbuser       = "timeseries";
+static char   *dbpass       = "timeseries";
+static char   *dbtable      = "timeseries.timeseries"; /* With schema */
 
 struct segdetails {
   int64_t startoffset;
@@ -116,9 +116,27 @@ main (int argc, char **argv)
   if ( processparam (argc, argv) < 0 )
     return 1;
   
-  if ( dbconninfo && ! nosync )
+  if ( ! nosync )
     {
-      dbconn = PQconnectdb(dbconninfo);
+      const char *keywords[7];
+      const char *values[7];
+      
+      keywords[0] = "host";
+      values[0] = dbhost;
+      keywords[1] = "port";
+      values[1] = dbport;
+      keywords[2] = "user";
+      values[2] = dbuser;
+      keywords[3] = "password";
+      values[3] = dbpass;
+      keywords[4] = "dbname";
+      values[4] = dbname;
+      keywords[5] = "fallback_application_name";
+      values[5] = PACKAGE;
+      keywords[6] = NULL;
+      values[6] = NULL;
+      
+      dbconn = PQconnectdbParams(keywords, values, 1);
       
       if ( ! dbconn )
 	{
@@ -293,24 +311,7 @@ main (int argc, char **argv)
  * Synchronize the time series list associated with a file entry to
  * the database.
  *
- * Expected database schema:
- *
- * Field Name   Type
- * ------------ ------------
- * network	character varying(2)
- * station	character varying(5)
- * location	character varying(2)
- * channel	character varying(3)
- * quality	character varying(1)
- * starttime	timestamp(6) without time zone
- * endtime	timestamp(6) without time zone
- * samplerate	numeric(10,6)
- * filename	character varying(256)
- * offset	numeric(15,0)
- * bytes	numeric(15,0)
- * hash		character varying(64)
- * updated	timestamp without time zone
- * scanned	timestamp without time zone
+ * Expected database schema is documented in the initial comment block.
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
@@ -322,8 +323,10 @@ syncfileseries (struct filelink *flp, time_t scantime)
   struct segdetails *sd;
   MSTrace *mst = NULL;
   int64_t bytecount;
-  char starttime[30];
-  char endtime[30];
+  char nslcq[64];
+  char starttime[64];
+  char endtime[64];
+  int64_t updated;
   char *filewhere = NULL;
   int baselength = 0;
   
@@ -376,9 +379,9 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
       
       matchresult = pquery (dbconn,
-			    "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
-			    "FROM timeseries "
-			    "WHERE %s", filewhere);
+			    "SELECT nslcq,hash,extract (epoch from updated) "
+			    "FROM %s "
+			    "WHERE %s", dbtable, filewhere);
       
       if ( PQresultStatus(matchresult) != PGRES_TUPLES_OK )
 	{
@@ -413,7 +416,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
       /* Delete existing rows for filename or previous version of filename */
       if ( PQntuples(matchresult) > 0 )
 	{
-	  result = pquery (dbconn, "DELETE FROM timeseries WHERE %s", filewhere);
+	  result = pquery (dbconn, "DELETE FROM %s WHERE %s", dbtable, filewhere);
 	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
 	    {
 	      fprintf (stderr, "DELETE failed: %s", PQerrorMessage(dbconn));
@@ -434,9 +437,6 @@ syncfileseries (struct filelink *flp, time_t scantime)
     {
       sd = (struct segdetails *)mst->prvtptr;
       
-      ms_hptime2seedtimestr (mst->starttime, starttime, 1);
-      ms_hptime2seedtimestr (mst->endtime, endtime, 1);
-      
       /* Calculate MD5 digest and string representation */
       md5_finish(&(sd->digeststate), digest);
       for (idx=0; idx < 16; idx++)
@@ -444,41 +444,54 @@ syncfileseries (struct filelink *flp, time_t scantime)
       
       bytecount = sd->endoffset - sd->startoffset + 1;
       
+      /* Generate label: network.station.location.channel.quality
+       * Labels can only include A-Za-z0-9_ (e.g. alphanumeric and underscore).
+       * Use underscore for any empty fields. */
+      snprintf (nslcq, sizeof(nslcq), "%s.%s.%s.%s.%c",
+		(*(mst->network)) ? mst->network : "_",
+		(*(mst->station)) ? mst->station : "_",
+		(*(mst->location)) ? mst->location : "_",
+		(*(mst->channel)) ? mst->channel : "_",
+		(mst->dataquality) ? mst->dataquality : '_');
+      
+      /* Create start and end time strings with UTC (-00) timezone indicators */
+      ms_hptime2isotimestr (mst->starttime, starttime, 1);
+      strcat (starttime, "-00");
+      ms_hptime2isotimestr (mst->endtime, endtime, 1);
+      strcat (endtime, "-00");
+      
+      updated = (int64_t) scantime;
+      
       if ( dbconn )
 	{
 	  int64_t updated = (int64_t) scantime;
-          char *qp;
 	  
 	  /* Search for matching trace entry to retain updated time if hash has not changed */
 	  if ( matchresult )
 	    {
-	      /* Fields: 0=net,1=sta,2=loc,3=chan,4=qual,5=hash,6=updated */
+	      /* Fields: 0=nslc,1=hash,2=updated */
 	      for ( idx=0; idx < PQntuples(matchresult); idx++ )
 		{
-                  qp = PQgetvalue(matchresult, idx, 4);
-
-		  if ( ! strcmp (digeststr, PQgetvalue(matchresult, idx, 5)) )
-		    if ( mst->dataquality == *qp ) 
-		      if ( ! strcmp (mst->channel, PQgetvalue(matchresult, idx, 3))) 
-			if ( ! strcmp (mst->location, PQgetvalue(matchresult, idx, 2)) )
-			  if ( ! strcmp (mst->station, PQgetvalue(matchresult, idx, 1)) )
-			    if ( ! strcmp (mst->network, PQgetvalue(matchresult, idx, 0)) )
-			      {
-				updated = strtoll (PQgetvalue(matchresult, idx, 6), NULL, 10);
-			      }
+		  if ( ! strcmp (digeststr, PQgetvalue(matchresult, idx, 1)) )
+		    {
+		      if ( ! strcmp (nslcq, PQgetvalue(matchresult, idx, 0)) )
+			{
+			  updated = strtoll (PQgetvalue(matchresult, idx, 2), NULL, 10);
+			}
+		    }
 		}
 	    }
 	  
 	  /* Insert new row */
 	  result = pquery (dbconn,
-			   "INSERT INTO timeseries "
-			   "(network,station,location,channel,quality,starttime,endtime,samplerate,filename,byteoffset,bytes,hash,updated,scanned) "
+			   "INSERT INTO %s "
+			   "(nslcq,timerange,samplerate,filename,byteoffset,bytes,hash,updated,scanned) "
 			   "VALUES "
-			   "('%s','%s','%s','%s','%.1s',"
-			   "to_timestamp(%.6f),to_timestamp(%.6f),"
+			   "('%s','[%s,%s]',"
 			   "%.6g,'%s',%lld,%lld,'%s',to_timestamp(%lld),to_timestamp(%lld))",
-			   mst->network, mst->station, mst->location, mst->channel, (mst->dataquality) ? &(mst->dataquality) : "",
-			   (double) MS_HPTIME2EPOCH(mst->starttime), (double) MS_HPTIME2EPOCH(mst->endtime),
+			   dbtable,
+			   nslcq,
+			   starttime, endtime,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
 			   (long long int) updated, (long long int) scantime
 			   );
@@ -494,13 +507,13 @@ syncfileseries (struct filelink *flp, time_t scantime)
       
       /* Print trace line when verbose >=2 or when verbose and nosync */
       if ( verbose >= 2 || (verbose && nosync) )
-	ms_log (0, "%s|%s|%s|%s|%.1s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld\n",
-		mst->network, mst->station, mst->location, mst->channel,
-		(mst->dataquality) ? &(mst->dataquality) : "",
-		starttime, endtime, mst->samprate, flp->filename,
-		sd->startoffset, bytecount, digeststr,
-		(long long int) scantime);
-
+	{
+	  ms_log (0, "%s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%lld\n",
+		  nslcq, starttime, endtime, mst->samprate, flp->filename,
+		  sd->startoffset, bytecount, digeststr,
+		  (long long int) updated, (long long int) scantime);
+	}
+      
       mst = mst->next;
     }
   
@@ -588,9 +601,25 @@ processparam (int argcount, char **argvec)
 	{
 	  nosync = 1;
 	}
-      else if (strncmp (argvec[optind], "-C", 2) == 0)
+      else if (strncmp (argvec[optind], "-table", 6) == 0)
 	{
-	  dbconninfo = strdup (getoptval(argcount, argvec, optind++));
+	  dbtable = strdup (getoptval(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-dbhost", 7) == 0)
+	{
+	  dbhost = strdup (getoptval(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-dbport", 7) == 0)
+	{
+	  dbport = strdup (getoptval(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-dbuser", 7) == 0)
+	{
+	  dbuser = strdup (getoptval(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-dbpass", 7) == 0)
+	{
+	  dbpass = strdup (getoptval(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-TRACE", 6) == 0)
         {
@@ -802,18 +831,22 @@ usage (void)
   fprintf (stderr, "Usage: %s [options] file1 [file2] [file3] ...\n\n", PACKAGE);
   fprintf (stderr,
 	   " ## General options ##\n"
-	   " -V           Report program version\n"
-	   " -h           Show this usage message\n"
-	   " -v           Be more verbose, multiple flags can be used\n"
-	   " -ns          No sync, perform data parsing but do not connect to database\n"
+	   " -V             Report program version\n"
+	   " -h             Show this usage message\n"
+	   " -v             Be more verbose, multiple flags can be used\n"
+	   " -ns            No sync, perform data parsing but do not connect to database\n"
 	   "\n"
-	   " -C conninfo  Database connection parameters\n"
-	   "                currently: '%s'\n"
-           " -TRACE       Enable libpq tracing facility and direct output to stderr\n"
+           " -table  table  Use specified table name, currently: %s\n"
+	   " -dbhost  host  Specify database host, currently: %s\n"
+	   " -dbport  port  Specify database port, currently: %s\n"
+	   " -dbuser  user  Specify database user name, currently: %s\n"
+	   " -dbpass  pass  Specify database user password, currently: %s\n"
+	   " -dbname  name  Specify database name or full connection info, currently: %s\n"
+           " -TRACE         Enable libpq tracing facility and direct output to stderr\n"
 	   "\n"
-	   " -tt secs     Specify a time tolerance for continuous traces\n"
-	   " -rt diff     Specify a sample rate tolerance for continuous traces\n"
+	   " -tt secs       Specify a time tolerance for continuous traces\n"
+	   " -rt diff       Specify a sample rate tolerance for continuous traces\n"
 	   "\n"
-	   " files        File(s) of Mini-SEED records, list files prefixed with '@'\n"
-	   "\n", dbconninfo);
+	   " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
+	   "\n", dbtable, dbhost, dbport, dbuser, dbpass, dbname);
 }  /* End of usage() */

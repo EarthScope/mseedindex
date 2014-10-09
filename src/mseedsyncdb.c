@@ -4,15 +4,20 @@
  * Opens user specified file(s), parses the Mini-SEED records and
  * synchronizes time series summary with PostgreSQL database schema.
  *
- * The time series are grouped by continuous segments of series
- * composed of contiguous records in a given file.  The result is that
- * each row in the schema represents a gapless segment of time series
- * contained in a single section of a file.
+ * The time series are grouped by NSLCQ records that are conterminous
+ * in a given file.  Each resulting row in the database represents the
+ * earliest and latest time, the number of contiguous segments and the
+ * total gap (non-coverage) in seconds from each group.
+ *
+ * The logic to determine contiguous segments and gap (non-coverage)
+ * is expecting the data to be organized into segments ordered by
+ * increasing start time.
  * 
  * Expected database schema:
  *
  * Field Name   Type
  * ------------ ------------
+ * id           serial (auto incrementing)
  * nslcq	ltree
  * timerange	tstzrange   [timestamps with time zone]
  * samplerate	numeric(10,6)
@@ -20,6 +25,8 @@
  * offset	numeric(15,0)
  * bytes	numeric(15,0)
  * hash		character varying(64)
+ * segments     integer
+ * gapseconds   real
  * updated	timestamp with time zone
  * scanned	timestamp with time zone
  *
@@ -29,7 +36,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2014.279
+ * modified 2014.281
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -50,7 +57,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.3"
+#define VERSION "0.4"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -66,11 +73,15 @@ static char   *dbport       = "5444";
 static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
 static char   *dbpass       = "timeseries";
-static char   *dbtable      = "timeseries.timeseries"; /* With schema */
+static char   *dbtable      = "timeseries.tsextents"; /* With schema */
 
 struct segdetails {
   int64_t startoffset;
   int64_t endoffset;
+  hptime_t earliest;
+  hptime_t latest;
+  int32_t segments;
+  double gapseconds;
   md5_state_t digeststate;
 };
 
@@ -85,6 +96,7 @@ struct filelink *filelisttail = 0;
 
 static int syncfileseries (struct filelink *flp, time_t scantime);
 static PGresult *pquery (PGconn *pgdb, const char *format, ...);
+void local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
 static int processparam (int argcount, char **argvec);
 static char *getoptval (int argcount, char **argvec, int argopt);
 static int addfile (char *filename);
@@ -181,7 +193,7 @@ main (int argc, char **argv)
       
       if ( verbose )
 	ms_log (1, "Set database session timezone to UTC\n");
-    }
+    } /* End of ! nosync */
   
   flp = filelist;
   while ( flp )
@@ -210,17 +222,27 @@ main (int argc, char **argv)
 				      msr->starttime, endtime, timetol);
 	    }
 	  
-	  /* Exception: check for channel matching records with no samples (e.g. detection records) */
-	  if ( mst != cmst && msr->samplecnt == 0 )
+	  /* Exception: check for matching channel records regardless of time */
+	  if ( mst != cmst )
 	    {
 	      mst = mst_findmatch (cmst, msr->dataquality, msr->network, msr->station,
 				   msr->location, msr->channel);
+
+	      /* If a match was found it must be a time tear relative to the current MSTrace */
 	      if ( mst == cmst )
 		{
 		  whence = 1;
+		  
+		  sd = (struct segdetails *)cmst->prvtptr;
+		  sd->segments++;
+		  
+		  /* Determine gap between the latest sample and this record if any */
+		  if ( msr->starttime > sd->latest )
+		    sd->gapseconds += (double) MS_HPTIME2EPOCH((msr->starttime - sd->latest));
 		}
 	    }
 	  
+	  /* Update details of current MSTrace if current record is an extension */
 	  if ( mst == cmst && whence == 1 && filepos == (prevfilepos + msr->reclen) )
 	    {
 	      if ( msr->samplecnt > 0 )
@@ -228,8 +250,16 @@ main (int argc, char **argv)
 	      
 	      sd = (struct segdetails *)cmst->prvtptr;
 	      sd->endoffset = filepos + msr->reclen - 1;
+	      
+	      /* Maintain earliest and latest time stamps */
+	      if ( msr->starttime < sd->earliest )
+		sd->earliest = msr->starttime;
+	      if ( endtime > sd->latest )
+		sd->latest = endtime;
+	      
 	      md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
 	    }
+	  /* Otherwise create a new MSTrace */
 	  else
 	    {
 	      /* Create & populate new current MSTrace and add it to the file MSTraceGroup */
@@ -256,6 +286,10 @@ main (int argc, char **argv)
 	      
 	      sd->startoffset = filepos;
 	      sd->endoffset = filepos + msr->reclen - 1;
+	      sd->earliest = msr->starttime;
+	      sd->latest = endtime;
+	      sd->segments = 1;
+	      sd->gapseconds = 0.0;
 	      
 	      memset (&(sd->digeststate), 0, sizeof(md5_state_t));
  	      md5_init (&(sd->digeststate));
@@ -265,7 +299,7 @@ main (int argc, char **argv)
 	  prevfilepos = filepos;
 	}
       
-      /* Print error if not EOF and not counting down records */
+      /* Print error if not EOF */
       if ( retcode != MS_ENDOFFILE )
 	{
 	  ms_log (2, "Cannot read %s: %s\n", flp->filename, ms_errorstr(retcode));
@@ -280,9 +314,9 @@ main (int argc, char **argv)
       if ( verbose >= 2 )
         {
           ms_log (1, "Segment list to synchronize for %s\n", flp->filename);
-	  mst_printtracelist (flp->mstg, 1, 1, 0);	
+	  local_mst_printtracelist (flp->mstg, 1);
 	}
-
+      
       /* Sync time series listing */
       if ( syncfileseries (flp, scantime) )
 	{
@@ -324,8 +358,8 @@ syncfileseries (struct filelink *flp, time_t scantime)
   MSTrace *mst = NULL;
   int64_t bytecount;
   char nslcq[64];
-  char starttime[64];
-  char endtime[64];
+  char earliest[64];
+  char latest[64];
   int64_t updated;
   char *filewhere = NULL;
   int baselength = 0;
@@ -454,11 +488,11 @@ syncfileseries (struct filelink *flp, time_t scantime)
 		(*(mst->channel)) ? mst->channel : "_",
 		(mst->dataquality) ? mst->dataquality : '_');
       
-      /* Create start and end time strings with UTC (-00) timezone indicators */
-      ms_hptime2isotimestr (mst->starttime, starttime, 1);
-      strcat (starttime, "-00");
-      ms_hptime2isotimestr (mst->endtime, endtime, 1);
-      strcat (endtime, "-00");
+      /* Create earliest and latest time strings with UTC (-00) timezone indicators */
+      ms_hptime2isotimestr (sd->earliest, earliest, 1);
+      strcat (earliest, "-00");
+      ms_hptime2isotimestr (sd->latest, latest, 1);
+      strcat (latest, "-00");
       
       updated = (int64_t) scantime;
       
@@ -485,14 +519,16 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	  /* Insert new row */
 	  result = pquery (dbconn,
 			   "INSERT INTO %s "
-			   "(nslcq,timerange,samplerate,filename,byteoffset,bytes,hash,updated,scanned) "
+			   "(nslcq,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,updated,scanned) "
 			   "VALUES "
 			   "('%s','[%s,%s]',"
-			   "%.6g,'%s',%lld,%lld,'%s',to_timestamp(%lld),to_timestamp(%lld))",
+			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,"
+			   "to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   nslcq,
-			   starttime, endtime,
+			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
+			   sd->segments, sd->gapseconds,
 			   (long long int) updated, (long long int) scantime
 			   );
 	  
@@ -508,9 +544,10 @@ syncfileseries (struct filelink *flp, time_t scantime)
       /* Print trace line when verbose >=2 or when verbose and nosync */
       if ( verbose >= 2 || (verbose && nosync) )
 	{
-	  ms_log (0, "%s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%lld\n",
-		  nslcq, starttime, endtime, mst->samprate, flp->filename,
+	  ms_log (0, "%s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%.6g|%lld|%lld\n",
+		  nslcq, earliest, latest, mst->samprate, flp->filename,
 		  sd->startoffset, bytecount, digeststr,
+		  sd->segments, sd->gapseconds,
 		  (long long int) updated, (long long int) scantime);
 	}
       
@@ -566,6 +603,80 @@ pquery (PGconn *pgdb, const char *format, ...)
   
   return result;
 }  /* End of pquery() */
+
+
+/***************************************************************************
+ * local_mst_printtracelist:
+ *
+ * Print trace list summary information for the specified MSTraceGroup.
+ *
+ * The timeformat flag can either be:
+ * 0 : SEED time format (year, day-of-year, hour, min, sec)
+ * 1 : ISO time format (year, month, day, hour, min, sec)
+ * 2 : Epoch time, seconds since the epoch
+ ***************************************************************************/
+void
+local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
+{
+  struct segdetails *sd;
+  MSTrace *mst = 0;
+  char srcname[50];
+  char prevsrcname[50];
+  char stime[30];
+  char etime[30];
+  char gapstr[20];
+  flag nogap;
+  double gap;
+  double delta;
+  double prevsamprate;
+  hptime_t prevendtime;
+  int tracecnt = 0;
+  
+  if ( ! mstg )
+    {
+      return;
+    }
+  
+  mst = mstg->traces;
+  
+  /* Print out header */
+  ms_log (0, "   Source                Earliest sample          Latest sample          Hz  Segments  GapSeconds\n");
+  
+  while ( mst )
+    {
+      mst_srcname (mst, srcname, 1);
+      sd = (struct segdetails *)mst->prvtptr;
+      
+      /* Create formatted time strings */
+      if ( timeformat == 2 )
+	{
+	  snprintf (stime, sizeof(stime), "%.6f", (double) MS_HPTIME2EPOCH(sd->earliest) );
+	  snprintf (etime, sizeof(etime), "%.6f", (double) MS_HPTIME2EPOCH(sd->latest) );
+	}
+      else if ( timeformat == 1 )
+	{
+	  if ( ms_hptime2isotimestr (sd->earliest, stime, 1) == NULL )
+	    ms_log (2, "Cannot convert earliest time for %s\n", srcname);
+	  
+	  if ( ms_hptime2isotimestr (sd->latest, etime, 1) == NULL )
+	    ms_log (2, "Cannot convert latest time for %s\n", srcname);
+	}
+      else
+	{
+	  if ( ms_hptime2seedtimestr (sd->earliest, stime, 1) == NULL )
+	    ms_log (2, "Cannot convert earliest time for %s\n", srcname);
+	  
+	  if ( ms_hptime2seedtimestr (sd->latest, etime, 1) == NULL )
+	    ms_log (2, "Cannot convert latest time for %s\n", srcname);
+	}
+      
+      /* Print trace info */
+      ms_log (0, "%-17s %-24s %-24s  %-3.3g %-9lld %-g\n",
+	      srcname, stime, etime, mst->samprate, sd->segments, sd->gapseconds);
+      
+      mst = mst->next;
+    }
+}  /* End of local_mst_printtracelist() */
 
 
 /***************************************************************************

@@ -1,4 +1,9 @@
-2013.279: 0.3
+2014.281: 0.4
+	- Group conterminuous NSLCQ records in a file and track number of
+	continuous segments and total gap (non-coverage) for each group.
+	- Update to new schema supporting the segment count and gap value.
+
+2014.279: 0.3
 	- Update to new schema using fields:
 	  * nslcq (ltree type for Net.Sta.Loc.Chan.Qual)
 	  * timerange (tstzrange type for inclusive start-end range)
@@ -9,7 +14,7 @@
 	  * -dbuser: specify database user name, default timeseries
 	  * -dbpass: specify database user password, default timeseries
 
-2013.260:
+2014.260:
 	- Update libmseed to 2.13.
 	- Rearrange src/Makefile to tidy it up and avoid LDFLAGS collision.
 

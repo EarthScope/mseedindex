@@ -621,16 +621,8 @@ local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
   struct segdetails *sd;
   MSTrace *mst = 0;
   char srcname[50];
-  char prevsrcname[50];
   char stime[30];
   char etime[30];
-  char gapstr[20];
-  flag nogap;
-  double gap;
-  double delta;
-  double prevsamprate;
-  hptime_t prevendtime;
-  int tracecnt = 0;
   
   if ( ! mstg )
     {

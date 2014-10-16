@@ -18,7 +18,11 @@
  * Field Name   Type
  * ------------ ------------
  * id           serial (auto incrementing)
- * nslcq	ltree
+ * network      character varying(2)
+ * station      character varying(5)
+ * location     character varying(2)
+ * channel      character varying(3)
+ * quality      character varying(1)
  * timerange	tstzrange   [timestamps with time zone]
  * samplerate	numeric(10,6)
  * filename	character varying(256)
@@ -36,7 +40,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2014.281
+ * modified 2014.288
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -57,7 +61,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.4"
+#define VERSION "0.5"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -357,7 +361,6 @@ syncfileseries (struct filelink *flp, time_t scantime)
   struct segdetails *sd;
   MSTrace *mst = NULL;
   int64_t bytecount;
-  char nslcq[64];
   char earliest[64];
   char latest[64];
   int64_t updated;
@@ -413,7 +416,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
       
       matchresult = pquery (dbconn,
-			    "SELECT nslcq,hash,extract (epoch from updated) "
+			    "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
 			    "FROM %s "
 			    "WHERE %s", dbtable, filewhere);
       
@@ -478,16 +481,6 @@ syncfileseries (struct filelink *flp, time_t scantime)
       
       bytecount = sd->endoffset - sd->startoffset + 1;
       
-      /* Generate label: network.station.location.channel.quality
-       * Labels can only include A-Za-z0-9_ (e.g. alphanumeric and underscore).
-       * Use underscore for any empty fields. */
-      snprintf (nslcq, sizeof(nslcq), "%s.%s.%s.%s.%c",
-		(*(mst->network)) ? mst->network : "_",
-		(*(mst->station)) ? mst->station : "_",
-		(*(mst->location)) ? mst->location : "_",
-		(*(mst->channel)) ? mst->channel : "_",
-		(mst->dataquality) ? mst->dataquality : '_');
-      
       /* Create earliest and latest time strings with UTC (-00) timezone indicators */
       ms_hptime2isotimestr (sd->earliest, earliest, 1);
       strcat (earliest, "-00");
@@ -503,29 +496,37 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	  /* Search for matching trace entry to retain updated time if hash has not changed */
 	  if ( matchresult )
 	    {
-	      /* Fields: 0=nslc,1=hash,2=updated */
+	      /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
 	      for ( idx=0; idx < PQntuples(matchresult); idx++ )
 		{
-		  if ( ! strcmp (digeststr, PQgetvalue(matchresult, idx, 1)) )
-		    {
-		      if ( ! strcmp (nslcq, PQgetvalue(matchresult, idx, 0)) )
-			{
-			  updated = strtoll (PQgetvalue(matchresult, idx, 2), NULL, 10);
-			}
-		    }
+                  char *qp = PQgetvalue(matchresult, idx, 4);
+		  
+		  if ( ! strcmp (digeststr, PQgetvalue(matchresult, idx, 5)) )
+                    if ( mst->dataquality == *qp )
+                      if ( ! strcmp (mst->channel, PQgetvalue(matchresult, idx, 3))) 
+                        if ( ! strcmp (mst->location, PQgetvalue(matchresult, idx, 2)) )
+                          if ( ! strcmp (mst->station, PQgetvalue(matchresult, idx, 1)) )
+                            if ( ! strcmp (mst->network, PQgetvalue(matchresult, idx, 0)) )
+                              {
+                                updated = strtoll (PQgetvalue(matchresult, idx, 6), NULL, 10);
+                              }
 		}
 	    }
 	  
 	  /* Insert new row */
 	  result = pquery (dbconn,
 			   "INSERT INTO %s "
-			   "(nslcq,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,updated,scanned) "
+			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,updated,scanned) "
 			   "VALUES "
-			   "('%s','[%s,%s]',"
+			   "('%s','%s','%s','%s','%c','[%s,%s]',"
 			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,"
 			   "to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
-			   nslcq,
+			   mst->network,
+			   mst->station,
+			   mst->location,
+			   mst->channel,
+			   mst->dataquality,
 			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
 			   sd->segments, sd->gapseconds,
@@ -544,8 +545,9 @@ syncfileseries (struct filelink *flp, time_t scantime)
       /* Print trace line when verbose >=2 or when verbose and nosync */
       if ( verbose >= 2 || (verbose && nosync) )
 	{
-	  ms_log (0, "%s|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%.6g|%lld|%lld\n",
-		  nslcq, earliest, latest, mst->samprate, flp->filename,
+	  ms_log (0, "%s|%s|%s|%s|%c|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%.6g|%lld|%lld\n",
+		  mst->network, mst->station, mst->location, mst->channel, mst->dataquality,
+		  earliest, latest, mst->samprate, flp->filename,
 		  sd->startoffset, bytecount, digeststr,
 		  sd->segments, sd->gapseconds,
 		  (long long int) updated, (long long int) scantime);

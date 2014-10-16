@@ -1,3 +1,7 @@
+2014.288: 0.5
+	- Update to new schema using separate network, station, location,
+	channel, quality as character fields instead of nslcq ltree.
+
 2014.281: 0.4
 	- Group conterminuous NSLCQ records in a file and track number of
 	continuous segments and total gap (non-coverage) for each group.

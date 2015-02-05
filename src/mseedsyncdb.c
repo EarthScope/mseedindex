@@ -26,11 +26,12 @@
  * timerange	tstzrange   [timestamps with time zone]
  * samplerate	numeric(10,6)
  * filename	character varying(256)
- * offset	numeric(15,0)
+ * byteoffset	numeric(15,0)
  * bytes	numeric(15,0)
  * hash		character varying(64)
  * segments     integer
  * gapseconds   real
+ * timeindex    hstore
  * updated	timestamp with time zone
  * scanned	timestamp with time zone
  *
@@ -40,7 +41,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2014.288
+ * modified 2015.035
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -61,7 +62,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.5"
+#define VERSION "0.6"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -72,12 +73,18 @@ static flag    nosync       = 0;    /* Control synchronization with database, 1 
 
 static PGconn *dbconn       = NULL; /* Database connection */
 static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
-static char   *dbhost       = "dbserv3";
+static char   *dbhost       = "ppasdb-prod";
 static char   *dbport       = "5444";
 static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
 static char   *dbpass       = "timeseries";
 static char   *dbtable      = "timeseries.tsextents"; /* With schema */
+
+struct timeindex {
+  hptime_t time;
+  int64_t byteoffset;
+  struct timeindex *next;
+};
 
 struct segdetails {
   int64_t startoffset;
@@ -87,6 +94,7 @@ struct segdetails {
   int32_t segments;
   double gapseconds;
   md5_state_t digeststate;
+  struct timeindex *tindex;
 };
 
 struct filelink {
@@ -98,6 +106,7 @@ struct filelink {
 struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
+struct timeindex *addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
 static int syncfileseries (struct filelink *flp, time_t scantime);
 static PGresult *pquery (PGconn *pgdb, const char *format, ...);
 void local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
@@ -105,18 +114,21 @@ static int processparam (int argcount, char **argvec);
 static char *getoptval (int argcount, char **argvec, int argopt);
 static int addfile (char *filename);
 static int addlistfile (char *filename);
+int AddToString (char **string, char *add, char* delim, int where, int maxlen);
 static void usage (void);
 
 int
 main (int argc, char **argv)
 {
   PGresult *result = NULL;
+  struct timeindex *tindex = NULL;
   struct segdetails *sd = NULL;
   struct filelink *flp = NULL;
   MSRecord *msr = NULL;
   MSTrace *mst = NULL;
   MSTrace *cmst = NULL;
   hptime_t endtime = HPTERROR;
+  hptime_t nextindex = HPTERROR;
   int retcode = MS_NOERROR;
   time_t scantime;
   
@@ -261,6 +273,13 @@ main (int argc, char **argv)
 	      if ( endtime > sd->latest )
 		sd->latest = endtime;
 	      
+              /* Add time index if record crosses over the next index time and set next index for 1 hour later */
+	      if ( endtime > nextindex )
+                {
+                  addtimeindex (&sd->tindex, msr->starttime, filepos);
+                  nextindex += MS_EPOCH2HPTIME(3600);
+                }
+              
 	      md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
 	    }
 	  /* Otherwise create a new MSTrace */
@@ -294,8 +313,13 @@ main (int argc, char **argv)
 	      sd->latest = endtime;
 	      sd->segments = 1;
 	      sd->gapseconds = 0.0;
-	      
-	      memset (&(sd->digeststate), 0, sizeof(md5_state_t));
+              
+              /* Initialize time index with first entry and set next index for 1 hour later */
+	      addtimeindex (&sd->tindex, msr->starttime, filepos);
+              nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
+              
+              /* Initialize MD5 calculation state */
+              memset (&(sd->digeststate), 0, sizeof(md5_state_t));
  	      md5_init (&(sd->digeststate));
 	      md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
 	    }
@@ -335,12 +359,60 @@ main (int argc, char **argv)
     {
       if ( verbose >= 2 )
 	ms_log (1, "Closing database connection to %s\n", PQhost(dbconn));
-
+      
       PQfinish (dbconn);
     }
   
   return retval;
 }  /* End of main() */
+
+
+/***************************************************************************
+ * addtimeindex():
+ *
+ * Add the specified time and byte offset to the time index.
+ *
+ * Returns a pointer to the new timeindex on success and NULL on error.
+ ***************************************************************************/
+struct timeindex *
+addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
+{
+  struct timeindex *findex;
+  struct timeindex *nindex;
+
+  if ( ! tindex )
+    return NULL;
+
+  /* Allocate new index entry and populate */
+  if ( ! (nindex = malloc (sizeof(struct timeindex))) )
+    {
+      ms_log (2, "Cannot allocate time index entry\n");
+      return NULL;
+    }
+  
+  nindex->time = time;
+  nindex->byteoffset = byteoffset;
+  nindex->next = 0;
+  
+  /* If the time index is empty set the root pointer */
+  if ( ! *tindex )
+    {
+      *tindex = nindex;
+    }
+  /* Otherwise add new index entry to end of chain */
+  else
+    {
+      findex = *tindex;
+      while ( findex->next )
+        {
+          findex = findex->next;
+        }
+      
+      findex->next = nindex;
+    }
+  
+  return nindex;
+}  /* End of addtimeindex */
 
 
 /***************************************************************************
@@ -366,6 +438,10 @@ syncfileseries (struct filelink *flp, time_t scantime)
   int64_t updated;
   char *filewhere = NULL;
   int baselength = 0;
+
+  struct timeindex *tindex;
+  char keyvalue[60];
+  char *timeindexstr = NULL;
   
   char *vp;
   char *ep = NULL;
@@ -487,12 +563,30 @@ syncfileseries (struct filelink *flp, time_t scantime)
       ms_hptime2isotimestr (sd->latest, latest, 1);
       strcat (latest, "-00");
       
+      /* Create the time index key-value hstore:
+       * 'time1=>offset1,time2=>offset2,time3=>offset3,...' */
+      tindex = sd->tindex;
+      while ( tindex )
+        {
+          snprintf (keyvalue, sizeof(keyvalue), "%.6f=>%lld",
+                    (double) MS_HPTIME2EPOCH(tindex->time),
+                    (long long int) tindex->byteoffset);
+          
+          if ( AddToString (&timeindexstr, keyvalue, ",", 0, 1024) )
+            {
+	      fprintf (stderr, "Time index has grown too large: %s\n", timeindexstr);
+	      return -1;
+            }
+          
+          tindex = tindex->next;
+        }
+      
       updated = (int64_t) scantime;
       
       if ( dbconn )
 	{
 	  int64_t updated = (int64_t) scantime;
-	  
+          
 	  /* Search for matching trace entry to retain updated time if hash has not changed */
 	  if ( matchresult )
 	    {
@@ -512,14 +606,14 @@ syncfileseries (struct filelink *flp, time_t scantime)
                               }
 		}
 	    }
-	  
+          
 	  /* Insert new row */
 	  result = pquery (dbconn,
 			   "INSERT INTO %s "
-			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,updated,scanned) "
+			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,updated,scanned) "
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c','[%s,%s]',"
-			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,"
+			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,'%s',"
 			   "to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,
@@ -530,6 +624,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
 			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
 			   sd->segments, sd->gapseconds,
+                           timeindexstr,
 			   (long long int) updated, (long long int) scantime
 			   );
 	  
@@ -551,7 +646,14 @@ syncfileseries (struct filelink *flp, time_t scantime)
 		  sd->startoffset, bytecount, digeststr,
 		  sd->segments, sd->gapseconds,
 		  (long long int) updated, (long long int) scantime);
+          printf (" TINDEX: '%s'\n", timeindexstr);
 	}
+      
+      if ( timeindexstr )
+        {
+          free (timeindexstr);
+          timeindexstr = NULL;
+        }
       
       mst = mst->next;
     }
@@ -667,6 +769,23 @@ local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
       /* Print trace info */
       ms_log (0, "%-17s %-24s %-24s  %-3.3g %-9lld %-g\n",
 	      srcname, stime, etime, mst->samprate, sd->segments, sd->gapseconds);
+      
+      if ( sd->tindex && verbose >= 3 )
+        {
+          struct timeindex *tindex = sd->tindex;
+          
+          while ( tindex )
+            {
+              snprintf (stime, sizeof(stime), "%.6f", (double) MS_HPTIME2EPOCH(tindex->time) );
+              
+              if ( ms_hptime2isotimestr (tindex->time, etime, 1) == NULL )
+                ms_log (2, "Cannot convert index time for %s\n", srcname);
+              
+              ms_log (0, "  %s (%s) - %lld\n", stime, etime, (long long int)tindex->byteoffset);
+              
+              tindex = tindex->next;
+            }
+        }
       
       mst = mst->next;
     }
@@ -923,6 +1042,79 @@ addlistfile (char *filename)
   
   return filecount;
 }  /* End of addlistfile() */
+
+
+/***************************************************************************
+ * AddToString:
+ *
+ * Concatinate one string to another with a delimiter in-between
+ * growing the target string as needed up to a maximum length.  The
+ * new addition can be added to either the beggining or end of the
+ * string using the where flag:
+ *
+ * where == 0 means add new addition to end of string
+ * where != 0 means add new addition to beginning of string
+ * 
+ * Return 0 on success, -1 on memory allocation error and -2 when
+ * string would grow beyond maximum length.
+ ***************************************************************************/
+int
+AddToString (char **string, char *add, char* delim, int where, int maxlen)
+{
+  int length;
+  char *ptr;
+  
+  if ( ! string || ! add )
+    return -1;
+  
+  /* If string is empty, allocate space and copy the addition */
+  if ( ! *string )
+    {
+      length = strlen (add) + 1;
+      
+      if ( length > maxlen )
+        return -2;
+      
+      if ( (*string = (char *) malloc (length)) == NULL )
+        return -1;
+      
+      strcpy (*string, add);
+    }
+  /* Otherwise add the addition with a delimiter */
+  else
+    {
+      length = strlen (*string) + strlen (delim) + strlen(add) + 1;
+      
+      if ( length > maxlen )
+        return -2;
+      
+      if ( (ptr = (char *) malloc (length)) == NULL )
+        return -1;
+      
+      /* Put addition at beginning of the string */
+      if ( where )
+        {
+          snprintf (ptr, length, "%s%s%s",
+                    (add) ? add : "",
+                    (delim) ? delim : "",
+                    *string);
+        }
+      /* Put addition at end of the string */
+      else
+        {
+          snprintf (ptr, length, "%s%s%s",
+                    *string,
+                    (delim) ? delim : "",
+                    (add) ? add : "");
+        }
+      
+      /* Free previous string and set pointer to newly allocated space */
+      free (*string);
+      *string = ptr;
+    }
+  
+  return 0;
+}  /* End of AddToString() */
 
 
 /***************************************************************************

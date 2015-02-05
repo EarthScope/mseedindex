@@ -1,3 +1,7 @@
+2015.035: 0.6
+	- Track time indexing within a segment at one hour intervals and
+	store indexing in a new hstore field.
+
 2014.288: 0.5
 	- Update to new schema using separate network, station, location,
 	channel, quality as character fields instead of nslcq ltree.

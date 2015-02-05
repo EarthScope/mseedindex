@@ -106,16 +106,16 @@ struct filelink {
 struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
-struct timeindex *addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
-static int syncfileseries (struct filelink *flp, time_t scantime);
-static PGresult *pquery (PGconn *pgdb, const char *format, ...);
-void local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
-static int processparam (int argcount, char **argvec);
-static char *getoptval (int argcount, char **argvec, int argopt);
-static int addfile (char *filename);
-static int addlistfile (char *filename);
+struct timeindex *AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
+static int SyncFileSeries (struct filelink *flp, time_t scantime);
+static PGresult *PQuery (PGconn *pgdb, const char *format, ...);
+void Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
+static int ProcessParam (int argcount, char **argvec);
+static char *GetOptValue (int argcount, char **argvec, int argopt);
+static int AddFile (char *filename);
+static int AddListFile (char *filename);
 int AddToString (char **string, char *add, char* delim, int where, int maxlen);
-static void usage (void);
+static void Usage (void);
 
 int
 main (int argc, char **argv)
@@ -141,7 +141,7 @@ main (int argc, char **argv)
   ms_loginit (NULL, NULL, NULL, "ERROR: ");
   
   /* Process given parameters (command line and parameter file) */
-  if ( processparam (argc, argv) < 0 )
+  if ( ProcessParam (argc, argv) < 0 )
     return 1;
   
   if ( ! nosync )
@@ -276,7 +276,7 @@ main (int argc, char **argv)
               /* Add time index if record crosses over the next index time and set next index for 1 hour later */
 	      if ( endtime > nextindex )
                 {
-                  addtimeindex (&sd->tindex, msr->starttime, filepos);
+                  AddTimeIndex (&sd->tindex, msr->starttime, filepos);
                   nextindex += MS_EPOCH2HPTIME(3600);
                 }
               
@@ -315,7 +315,7 @@ main (int argc, char **argv)
 	      sd->gapseconds = 0.0;
               
               /* Initialize time index with first entry and set next index for 1 hour later */
-	      addtimeindex (&sd->tindex, msr->starttime, filepos);
+	      AddTimeIndex (&sd->tindex, msr->starttime, filepos);
               nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
               
               /* Initialize MD5 calculation state */
@@ -342,11 +342,11 @@ main (int argc, char **argv)
       if ( verbose >= 2 )
         {
           ms_log (1, "Segment list to synchronize for %s\n", flp->filename);
-	  local_mst_printtracelist (flp->mstg, 1);
+	  Local_mst_printtracelist (flp->mstg, 1);
 	}
       
       /* Sync time series listing */
-      if ( syncfileseries (flp, scantime) )
+      if ( SyncFileSeries (flp, scantime) )
 	{
 	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
 	  exit (1);
@@ -368,14 +368,14 @@ main (int argc, char **argv)
 
 
 /***************************************************************************
- * addtimeindex():
+ * AddTimeIndex():
  *
  * Add the specified time and byte offset to the time index.
  *
  * Returns a pointer to the new timeindex on success and NULL on error.
  ***************************************************************************/
 struct timeindex *
-addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
+AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
 {
   struct timeindex *findex;
   struct timeindex *nindex;
@@ -412,11 +412,11 @@ addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
     }
   
   return nindex;
-}  /* End of addtimeindex */
+}  /* End of AddTimeIndex */
 
 
 /***************************************************************************
- * syncfileseries():
+ * SyncFileSeries():
  *
  * Synchronize the time series list associated with a file entry to
  * the database.
@@ -426,7 +426,7 @@ addtimeindex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static int
-syncfileseries (struct filelink *flp, time_t scantime)
+SyncFileSeries (struct filelink *flp, time_t scantime)
 {
   PGresult *result = NULL;
   PGresult *matchresult = NULL;
@@ -491,7 +491,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
       if ( verbose >= 2 )
 	ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
       
-      matchresult = pquery (dbconn,
+      matchresult = PQuery (dbconn,
 			    "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
 			    "FROM %s "
 			    "WHERE %s", dbtable, filewhere);
@@ -529,7 +529,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
       /* Delete existing rows for filename or previous version of filename */
       if ( PQntuples(matchresult) > 0 )
 	{
-	  result = pquery (dbconn, "DELETE FROM %s WHERE %s", dbtable, filewhere);
+	  result = PQuery (dbconn, "DELETE FROM %s WHERE %s", dbtable, filewhere);
 	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
 	    {
 	      fprintf (stderr, "DELETE failed: %s", PQerrorMessage(dbconn));
@@ -608,7 +608,7 @@ syncfileseries (struct filelink *flp, time_t scantime)
 	    }
           
 	  /* Insert new row */
-	  result = pquery (dbconn,
+	  result = PQuery (dbconn,
 			   "INSERT INTO %s "
 			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,updated,scanned) "
 			   "VALUES "
@@ -669,18 +669,18 @@ syncfileseries (struct filelink *flp, time_t scantime)
     }
   
   return 0;
-}  /* End of syncfileseries() */
+}  /* End of SyncFileSeries() */
 
 
 /***************************************************************************
- * pquery():
+ * PQuery():
  *
  * Execute a query to the Postgres DB connection at 'pgdb'.
  *
  * Returns PGresult on success and NULL on failure
  ***************************************************************************/
 static PGresult *
-pquery (PGconn *pgdb, const char *format, ...)
+PQuery (PGconn *pgdb, const char *format, ...)
 {
   va_list argv;
   char *query = NULL;
@@ -706,11 +706,11 @@ pquery (PGconn *pgdb, const char *format, ...)
     free (query);
   
   return result;
-}  /* End of pquery() */
+}  /* End of PQuery() */
 
 
 /***************************************************************************
- * local_mst_printtracelist:
+ * Local_mst_printtracelist:
  *
  * Print trace list summary information for the specified MSTraceGroup.
  *
@@ -720,7 +720,7 @@ pquery (PGconn *pgdb, const char *format, ...)
  * 2 : Epoch time, seconds since the epoch
  ***************************************************************************/
 void
-local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
+Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
 {
   struct segdetails *sd;
   MSTrace *mst = 0;
@@ -789,17 +789,17 @@ local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
       
       mst = mst->next;
     }
-}  /* End of local_mst_printtracelist() */
+}  /* End of Local_mst_printtracelist() */
 
 
 /***************************************************************************
- * parameter_proc():
+ * ProcessParam():
  * Process the command line parameters.
  *
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static int
-processparam (int argcount, char **argvec)
+ProcessParam (int argcount, char **argvec)
 {
   int optind;
   char *tptr;
@@ -814,7 +814,7 @@ processparam (int argcount, char **argvec)
 	}
       else if (strcmp (argvec[optind], "-h") == 0)
 	{
-	  usage();
+	  Usage();
 	  exit (0);
 	}
       else if (strncmp (argvec[optind], "-v", 2) == 0)
@@ -827,23 +827,23 @@ processparam (int argcount, char **argvec)
 	}
       else if (strncmp (argvec[optind], "-table", 6) == 0)
 	{
-	  dbtable = strdup (getoptval(argcount, argvec, optind++));
+	  dbtable = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbhost", 7) == 0)
 	{
-	  dbhost = strdup (getoptval(argcount, argvec, optind++));
+	  dbhost = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbport", 7) == 0)
 	{
-	  dbport = strdup (getoptval(argcount, argvec, optind++));
+	  dbport = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbuser", 7) == 0)
 	{
-	  dbuser = strdup (getoptval(argcount, argvec, optind++));
+	  dbuser = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbpass", 7) == 0)
 	{
-	  dbpass = strdup (getoptval(argcount, argvec, optind++));
+	  dbpass = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-TRACE", 6) == 0)
         {
@@ -851,11 +851,11 @@ processparam (int argcount, char **argvec)
         }
       else if (strcmp (argvec[optind], "-tt") == 0)
 	{
-	  timetol = strtod (getoptval(argcount, argvec, optind++), NULL);
+	  timetol = strtod (GetOptValue(argcount, argvec, optind++), NULL);
 	}
       else if (strcmp (argvec[optind], "-rt") == 0)
 	{
-	  sampratetol = strtod (getoptval(argcount, argvec, optind++), NULL);
+	  sampratetol = strtod (GetOptValue(argcount, argvec, optind++), NULL);
 	}
       else if (strncmp (argvec[optind], "-", 1) == 0 &&
 	       strlen (argvec[optind]) > 1 )
@@ -870,7 +870,7 @@ processparam (int argcount, char **argvec)
           /* Check for an input file list */
           if ( tptr[0] == '@' )
             {
-              if ( addlistfile (tptr+1) < 0 )
+              if ( AddListFile (tptr+1) < 0 )
                 {
                   ms_log (2, "Error adding list file %s", tptr+1);
                   exit (1);
@@ -880,7 +880,7 @@ processparam (int argcount, char **argvec)
           else
             {
               /* Add file to global file list */
-              if ( addfile (tptr) )
+              if ( AddFile (tptr) )
                 {
                   ms_log (2, "Error adding file to input list %s", tptr);
                   exit (1);
@@ -903,11 +903,11 @@ processparam (int argcount, char **argvec)
     ms_log (1, "%s version: %s\n", PACKAGE, VERSION);
   
   return 0;
-}  /* End of parameter_proc() */
+}  /* End of ProcessParam() */
 
 
 /***************************************************************************
- * getoptval:
+ * GetOptValue:
  * Return the value to a command line option; checking that the value is 
  * itself not an option (starting with '-') and is not past the end of
  * the argument list.
@@ -919,10 +919,10 @@ processparam (int argcount, char **argvec)
  * Returns value on success and exits with error message on failure
  ***************************************************************************/
 static char *
-getoptval (int argcount, char **argvec, int argopt)
+GetOptValue (int argcount, char **argvec, int argopt)
 {
   if ( argvec == NULL || argvec[argopt] == NULL ) {
-    ms_log (2, "getoptval(): NULL option requested\n");
+    ms_log (2, "GetOptValue(): NULL option requested\n");
     exit (1);
     return 0;
   }
@@ -938,36 +938,36 @@ getoptval (int argcount, char **argvec, int argopt)
   ms_log (2, "Option %s requires a value, try -h for usage\n", argvec[argopt]);
   exit (1);
   return 0;
-}  /* End of getoptval() */
+}  /* End of GetOptValue() */
 
 
 /***************************************************************************
- * addfile:
+ * AddFile:
  *
  * Add file to end of the global file list (filelist).
  *
  * Returns 0 on success and -1 on error.
  ***************************************************************************/
 static int
-addfile (char *filename)
+AddFile (char *filename)
 {
   struct filelink *newlp;
   
   if ( ! filename )
     {
-      ms_log (2, "addfile(): No file name specified\n");
+      ms_log (2, "AddFile(): No file name specified\n");
       return -1;
     }
   
   if ( ! (newlp = malloc (sizeof (struct filelink))) )
     {
-      ms_log (2, "addfile(): Cannot allocate memory\n");
+      ms_log (2, "AddFile(): Cannot allocate memory\n");
       return -1;
     }
 
   if ( ! (newlp->filename = strdup(filename)) )
     {
-      ms_log (2, "addfile(): Cannot duplicate filename string\n");
+      ms_log (2, "AddFile(): Cannot duplicate filename string\n");
       return -1;
     }
   
@@ -987,18 +987,18 @@ addfile (char *filename)
     }
   
   return 0;
-}  /* End of addfile() */
+}  /* End of AddFile() */
 
 
 /***************************************************************************
- * addlistfile:
+ * AddListFile:
  *
  * Add files listed in the specified file to the global input file list.
  *
  * Returns count of files added on success and -1 on error.
  ***************************************************************************/
 static int
-addlistfile (char *filename) 
+AddListFile (char *filename) 
 {
   FILE *fp;
   char filelistent[1024];
@@ -1032,7 +1032,7 @@ addlistfile (char *filename)
       if ( verbose > 1 )
         ms_log (1, "Adding '%s' from list file\n", filelistent);
       
-      if ( addfile (filelistent) )
+      if ( AddFile (filelistent) )
         return -1;
       
       filecount++;
@@ -1041,7 +1041,7 @@ addlistfile (char *filename)
   fclose (fp);
   
   return filecount;
-}  /* End of addlistfile() */
+}  /* End of AddListFile() */
 
 
 /***************************************************************************
@@ -1118,11 +1118,11 @@ AddToString (char **string, char *add, char* delim, int where, int maxlen)
 
 
 /***************************************************************************
- * usage():
+ * Usage():
  * Print the usage message.
  ***************************************************************************/
 static void
-usage (void)
+Usage (void)
 {
   fprintf (stderr, "%s - Synchronize Mini-SEED to database schema version: %s\n\n", PACKAGE, VERSION);
   fprintf (stderr, "Usage: %s [options] file1 [file2] [file3] ...\n\n", PACKAGE);
@@ -1146,4 +1146,4 @@ usage (void)
 	   "\n"
 	   " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
 	   "\n", dbtable, dbhost, dbport, dbuser, dbpass, dbname);
-}  /* End of usage() */
+}  /* End of Usage() */

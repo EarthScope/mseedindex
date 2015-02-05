@@ -121,7 +121,6 @@ int
 main (int argc, char **argv)
 {
   PGresult *result = NULL;
-  struct timeindex *tindex = NULL;
   struct segdetails *sd = NULL;
   struct filelink *flp = NULL;
   MSRecord *msr = NULL;

@@ -1,3 +1,7 @@
+2015.037: 0.7
+	- Store file modification time in new filemodtime field.
+	- Improve failure handling on memory allocation errors.
+
 2015.035: 0.6
 	- Track time indexing within a segment at one hour intervals and
 	store indexing in a new hstore field.

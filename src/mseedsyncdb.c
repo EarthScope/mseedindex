@@ -23,17 +23,18 @@
  * location     character varying(2)
  * channel      character varying(3)
  * quality      character varying(1)
- * timerange	tstzrange   [timestamps with time zone]
- * samplerate	numeric(10,6)
- * filename	character varying(256)
- * byteoffset	numeric(15,0)
- * bytes	numeric(15,0)
- * hash		character varying(64)
+ * timerange    tstzrange   [timestamps with time zone]
+ * samplerate   numeric(10,6)
+ * filename     character varying(256)
+ * byteoffset   numeric(15,0)
+ * bytes        numeric(15,0)
+ * hash         character varying(64)
  * segments     integer
  * gapseconds   real
  * timeindex    hstore
- * updated	timestamp with time zone
- * scanned	timestamp with time zone
+ * filemodtime  timestamp with time zone
+ * updated      timestamp with time zone
+ * scanned      timestamp with time zone
  *
  * In general critical error messages are prefixed with "ERROR:" and
  * the return code will be 1.  On successfull operation the return
@@ -41,7 +42,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.035
+ * modified 2015.037
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -52,6 +53,7 @@
 #include <stdarg.h>
 #include <string.h>
 #include <time.h>
+#include <sys/stat.h>
 #include <errno.h>
 #include <ctype.h>
 #include <regex.h>
@@ -62,7 +64,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.6"
+#define VERSION "0.7"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -99,6 +101,7 @@ struct segdetails {
 
 struct filelink {
   char *filename;
+  time_t filemodtime;
   MSTraceGroup *mstg;
   struct filelink *next;
 };
@@ -130,6 +133,7 @@ main (int argc, char **argv)
   hptime_t nextindex = HPTERROR;
   int retcode = MS_NOERROR;
   time_t scantime;
+  struct stat st;
   
   off_t filepos = 0;
   off_t prevfilepos = 0;
@@ -200,9 +204,9 @@ main (int argc, char **argv)
       result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
       if ( PQresultStatus(result) != PGRES_COMMAND_OK )
 	{
-	  fprintf (stderr, "SET timezone command failed: %s", PQerrorMessage(dbconn));
+	  ms_log (2, "SET timezone command failed: %s", PQerrorMessage(dbconn));
 	  PQclear (result);
-	  exit(1);
+	  exit (1);
 	}
       PQclear (result);
       
@@ -216,9 +220,24 @@ main (int argc, char **argv)
       if ( verbose >= 1 )
 	ms_log (1, "Processing: %s\n", flp->filename);
       
-      flp->mstg = mst_initgroup (flp->mstg);
-      cmst = NULL;
+      if ( (flp->mstg = mst_initgroup (flp->mstg)) == NULL )
+        {
+          ms_log (2, "Could not allocate MSTracegroup, out of memory?\n");
+          if ( dbconn )
+            PQfinish (dbconn);
+	  exit (1);
+        }
       
+      if ( stat (flp->filename, &st) )
+        {
+          ms_log (2, "Could not stat %s: %s\n", flp->filename, strerror(errno));
+          if ( dbconn )
+            PQfinish (dbconn);
+	  exit (1);
+        }
+      
+      flp->filemodtime = st.st_mtime;
+      cmst = NULL;
       scantime = time (NULL);
       
       /* Read records from the input file */
@@ -275,7 +294,12 @@ main (int argc, char **argv)
               /* Add time index if record crosses over the next index time and set next index for 1 hour later */
 	      if ( endtime > nextindex )
                 {
-                  AddTimeIndex (&sd->tindex, msr->starttime, filepos);
+                  if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
+                    {
+                      if ( dbconn )
+                        PQfinish (dbconn);
+                      exit (1);
+                    }
                   nextindex += MS_EPOCH2HPTIME(3600);
                 }
               
@@ -314,7 +338,12 @@ main (int argc, char **argv)
 	      sd->gapseconds = 0.0;
               
               /* Initialize time index with first entry and set next index for 1 hour later */
-	      AddTimeIndex (&sd->tindex, msr->starttime, filepos);
+	      if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
+                {
+                  if ( dbconn )
+                    PQfinish (dbconn);
+                  exit (1);
+                }
               nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
               
               /* Initialize MD5 calculation state */
@@ -324,13 +353,15 @@ main (int argc, char **argv)
 	    }
 	  
 	  prevfilepos = filepos;
-	}
+	} /* Done reading records */
       
       /* Print error if not EOF */
       if ( retcode != MS_ENDOFFILE )
 	{
 	  ms_log (2, "Cannot read %s: %s\n", flp->filename, ms_errorstr(retcode));
 	  ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
+          if ( dbconn )
+            PQfinish (dbconn);
 	  exit (1);
 	}
       
@@ -348,6 +379,8 @@ main (int argc, char **argv)
       if ( SyncFileSeries (flp, scantime) )
 	{
 	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
+          if ( dbconn )
+            PQfinish (dbconn);
 	  exit (1);
 	}
       
@@ -385,7 +418,7 @@ AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
   /* Allocate new index entry and populate */
   if ( ! (nindex = malloc (sizeof(struct timeindex))) )
     {
-      ms_log (2, "Cannot allocate time index entry\n");
+      ms_log (2, "Cannot allocate time index entry, out of memory?\n");
       return NULL;
     }
   
@@ -609,11 +642,11 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 	  /* Insert new row */
 	  result = PQuery (dbconn,
 			   "INSERT INTO %s "
-			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,updated,scanned) "
+			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,filemodtime,updated,scanned) "
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c','[%s,%s]',"
 			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,'%s',"
-			   "to_timestamp(%lld),to_timestamp(%lld))",
+			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,
 			   mst->station,
@@ -624,7 +657,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
 			   sd->segments, sd->gapseconds,
                            timeindexstr,
-			   (long long int) updated, (long long int) scantime
+			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
 			   );
 	  
 	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )

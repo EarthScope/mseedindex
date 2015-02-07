@@ -1,3 +1,6 @@
+2015.037: 0.8
+	- Fix printing error, print int32_t segments as %d insted of %lld.
+
 2015.037: 0.7
 	- Store file modification time in new filemodtime field.
 	- Improve failure handling on memory allocation errors.

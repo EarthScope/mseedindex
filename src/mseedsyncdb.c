@@ -64,7 +64,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.7"
+#define VERSION "0.8"
 #define PACKAGE "mseedsyncdb"
 
 static int     retval       = 0;
@@ -638,14 +638,14 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
                               }
 		}
 	    }
-          
+
 	  /* Insert new row */
 	  result = PQuery (dbconn,
 			   "INSERT INTO %s "
 			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,filemodtime,updated,scanned) "
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c','[%s,%s]',"
-			   "%.6g,'%s',%lld,%lld,'%s',%lld,%.6g,'%s',"
+			   "%.6g,'%s',%lld,%lld,'%s',%d,%.6g,'%s',"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,

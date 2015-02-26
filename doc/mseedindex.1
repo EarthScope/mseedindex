@@ -1,14 +1,14 @@
-.TH MSEEDSYNCDB 1 2014/10/6
+.TH MSEEDINDEX 1 2014/10/6
 .SH NAME
 Synchronize Mini-SEED with database schema
 
 .SH SYNOPSIS
 .nf
-mseedsyncdb [options] file1 [file2 file3 ...]
+mseedindex [options] file1 [file2 file3 ...]
 
 .fi
 .SH DESCRIPTION
-\fBmseedsyncdb\fP reads Mini-SEED, determines contiguous time series
+\fBmseedindex\fP reads Mini-SEED, determines contiguous time series
 represented and synchronizes the information with a database.
 
 A segment is considered contiguous if it forms a continuous series in
@@ -38,21 +38,21 @@ file will be inserted, effectively replacing all rows for a given file.
 
 This situation leads to a timing issues if data file
 replacement/synchronization and data extraction are occuring at the
-same time.  To avoid this race condition \fBmseedsyncdb\fP supports
+same time.  To avoid this race condition \fBmseedindex\fP supports
 the following:
 
 1) all deletions of existing rows and insertions of rows for a given
 file are performed in a transaction, meaning that the operation is
 atomic and no database reader can see a mix of rows from both files.
 
-2) \fBmseedsyncdb\fP recognizes file versions as numbers appended to a
+2) \fBmseedindex\fP recognizes file versions as numbers appended to a
 file name following a \fB#\fP character, with this pattern:
 
 .nf
 /path/to/archive.file#VERSION
 .fi
 
-If a file name contains this version information \fBmseedsyncdb\fP
+If a file name contains this version information \fBmseedindex\fP
 will search for existing rows in the database that match everything
 but the version, e.g. \fB/path/to/archive.file*\fP or \fBfilename like
 /path/to/archive.file%\fP in SQL.

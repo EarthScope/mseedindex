@@ -1,5 +1,5 @@
 /***************************************************************************
- * mseedsyncdb.c - Synchronize Mini-SEED with database schema
+ * mseedindex.c - Synchronize Mini-SEED with database schema
  *
  * Opens user specified file(s), parses the Mini-SEED records and
  * synchronizes time series summary with PostgreSQL database schema.
@@ -65,7 +65,7 @@
 #include "md5.h"
 
 #define VERSION "0.8"
-#define PACKAGE "mseedsyncdb"
+#define PACKAGE "mseedindex"
 
 static int     retval       = 0;
 static flag    verbose      = 0;

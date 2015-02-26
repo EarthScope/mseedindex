@@ -1,3 +1,6 @@
+2015.057:
+	- Rename to mseedindex from mseedsyncdb.
+
 2015.037: 0.8
 	- Fix printing error, print int32_t segments as %d insted of %lld.
 

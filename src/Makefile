@@ -4,9 +4,9 @@
 #   CC : Specify the C compiler to use
 #   CFLAGS : Specify compiler options to use
 
-BIN = mseedsyncdb
+BIN = mseedindex
 
-SRCS = mseedsyncdb.c md5.c
+SRCS = mseedindex.c md5.c
 OBJS = $(SRCS:.c=.o)
 
 # Required compiler parameters

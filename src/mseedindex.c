@@ -5,9 +5,10 @@
  * synchronizes time series summary with PostgreSQL database schema.
  *
  * The time series are grouped by NSLCQ records that are conterminous
- * in a given file.  Each resulting row in the database represents the
+ * in a given file, referred to as a section.  Each section will be
+ * represented as a single row in the database and includes the
  * earliest and latest time, an index of time->byteoffset and a list
- * of time spans covered by the data.
+ * of time spans covered by the data and other details.
  *
  * The time index is created such that increasing time markers are
  * always at increasing byte offsets.  This is designed to allow easy
@@ -92,7 +93,7 @@ struct timeindex {
   struct timeindex *next;
 };
 
-struct segdetails {
+struct sectiondetails {
   int64_t startoffset;
   int64_t endoffset;
   hptime_t earliest;
@@ -127,7 +128,7 @@ int
 main (int argc, char **argv)
 {
   PGresult *result = NULL;
-  struct segdetails *sd = NULL;
+  struct sectiondetails *sd = NULL;
   struct filelink *flp = NULL;
   MSRecord *msr = NULL;
   MSTrace *mst = NULL;
@@ -261,7 +262,7 @@ main (int argc, char **argv)
 	      if ( msr->samplecnt > 0 )
 		mst_addmsr (cmst, msr, 1);
 	      
-	      sd = (struct segdetails *)cmst->prvtptr;
+	      sd = (struct sectiondetails *)cmst->prvtptr;
 	      sd->endoffset = filepos + msr->reclen - 1;
 	      
 	      /* Maintain earliest and latest time stamps */
@@ -311,9 +312,9 @@ main (int argc, char **argv)
 	      cmst->samprate = msr->samprate;
 	      cmst->samplecnt = msr->samplecnt;
 	      
-	      if ( ! (sd = calloc (1, sizeof (struct segdetails))) )
+	      if ( ! (sd = calloc (1, sizeof (struct sectiondetails))) )
 		{
-		  ms_log (2, "Cannot allocate segment details\n");
+		  ms_log (2, "Cannot allocate section details\n");
 		  return 1;
 		}
 	      
@@ -372,10 +373,10 @@ main (int argc, char **argv)
       /* Make sure everything is cleaned up */
       ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
 
-      /* Print segments for verbose output */
+      /* Print sections for verbose output */
       if ( verbose >= 2 )
         {
-          ms_log (1, "Segment list to synchronize for %s\n", flp->filename);
+          ms_log (1, "Section list to synchronize for %s\n", flp->filename);
 	  Local_mst_printtracelist (flp->mstg, 1);
 	}
       
@@ -466,7 +467,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 {
   PGresult *result = NULL;
   PGresult *matchresult = NULL;
-  struct segdetails *sd;
+  struct sectiondetails *sd;
   MSTrace *mst = NULL;
   int64_t bytecount;
   char earliest[64];
@@ -492,7 +493,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
     return -1;
   
   if ( verbose )
-    ms_log (0, "Synchronizing segments for %s\n", flp->filename);
+    ms_log (0, "Synchronizing sections for %s\n", flp->filename);
   
   /* Check and parse version from file */
   if ( (vp = strrchr (flp->filename, '#')) )
@@ -585,7 +586,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
   mst = flp->mstg->traces;
   while ( mst )
     {
-      sd = (struct segdetails *)mst->prvtptr;
+      sd = (struct sectiondetails *)mst->prvtptr;
       
       /* Calculate MD5 digest and string representation */
       md5_finish(&(sd->digeststate), digest);
@@ -798,7 +799,7 @@ PQuery (PGconn *pgdb, const char *format, ...)
 void
 Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
 {
-  struct segdetails *sd;
+  struct sectiondetails *sd;
   MSTrace *mst = 0;
   char srcname[50];
   char stime[30];
@@ -817,7 +818,7 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
   while ( mst )
     {
       mst_srcname (mst, srcname, 1);
-      sd = (struct segdetails *)mst->prvtptr;
+      sd = (struct sectiondetails *)mst->prvtptr;
       
       /* Create formatted time strings */
       if ( timeformat == 2 )
@@ -881,10 +882,10 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
               while ( seg )
                 {
                   if ( ms_hptime2isotimestr (seg->starttime, stime, 1) == NULL )
-                    ms_log (2, "Cannot convert segment start time for %s\n", id->srcname);
+                    ms_log (2, "Cannot convert span start time for %s\n", id->srcname);
                   
                   if ( ms_hptime2isotimestr (seg->endtime, etime, 1) == NULL )
-                    ms_log (2, "Cannot convert segment end time for %s\n", id->srcname);
+                    ms_log (2, "Cannot convert span end time for %s\n", id->srcname);
                   
                   ms_log (0, "  %s - %s\n", stime, etime);
                   

@@ -1,3 +1,7 @@
+2015.059:
+	- Add time span tracking for each contiguous NSLCQ section in file,
+	store as array of numrange values (epoch times) in 'timespans' field.
+
 2015.057:
 	- Rename to mseedindex from mseedsyncdb.
 

@@ -23,7 +23,7 @@
  * location     character varying(2)
  * channel      character varying(3)
  * quality      character varying(1)
- * timerange    tstzrange   [timestamps with time zone]
+ * timerange    tstzrange    [timestamps with time zone]
  * samplerate   numeric(10,6)
  * filename     character varying(256)
  * byteoffset   numeric(15,0)
@@ -32,6 +32,7 @@
  * segments     integer
  * gapseconds   real
  * timeindex    hstore
+ * timespans    numrange[]   [array of numrange values, epoch times]
  * filemodtime  timestamp with time zone
  * updated      timestamp with time zone
  * scanned      timestamp with time zone
@@ -42,7 +43,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.037
+ * modified 2015.059
  ***************************************************************************/
 
 // Enforce increasing version number for data files?
@@ -64,7 +65,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.8"
+#define VERSION "0.9"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -97,6 +98,7 @@ struct segdetails {
   double gapseconds;
   md5_state_t digeststate;
   struct timeindex *tindex;
+  MSTraceList *spans;
 };
 
 struct filelink {
@@ -222,7 +224,7 @@ main (int argc, char **argv)
       
       if ( (flp->mstg = mst_initgroup (flp->mstg)) == NULL )
         {
-          ms_log (2, "Could not allocate MSTracegroup, out of memory?\n");
+          ms_log (2, "Could not allocate MSTraceGroup, out of memory?\n");
           if ( dbconn )
             PQfinish (dbconn);
 	  exit (1);
@@ -302,6 +304,15 @@ main (int argc, char **argv)
                     }
                   nextindex += MS_EPOCH2HPTIME(3600);
                 }
+
+              /* Add coverage to span list */
+              if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+                {
+                  ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+                  if ( dbconn )
+                    PQfinish (dbconn);
+                  exit (1);
+                }
               
 	      md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
 	    }
@@ -345,6 +356,23 @@ main (int argc, char **argv)
                   exit (1);
                 }
               nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
+              
+              /* Initialize span list and populate */
+              if ( (sd->spans = mstl_init(NULL)) == NULL )
+                {
+                  ms_log (2, "Could not allocate MSTraceList, out of memory?\n");
+                  if ( dbconn )
+                    PQfinish (dbconn);
+                  exit (1);
+                }
+              
+              if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+                {
+                  ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+                  if ( dbconn )
+                    PQfinish (dbconn);
+                  exit (1);
+                }
               
               /* Initialize MD5 calculation state */
               memset (&(sd->digeststate), 0, sizeof(md5_state_t));
@@ -472,8 +500,9 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
   int baselength = 0;
 
   struct timeindex *tindex;
-  char keyvalue[60];
+  char tmpstring[100];
   char *timeindexstr = NULL;
+  char *timespansstr = NULL;
   
   char *vp;
   char *ep = NULL;
@@ -600,17 +629,52 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       tindex = sd->tindex;
       while ( tindex )
         {
-          snprintf (keyvalue, sizeof(keyvalue), "%.6f=>%lld",
+          snprintf (tmpstring, sizeof(tmpstring), "%.6f=>%lld",
                     (double) MS_HPTIME2EPOCH(tindex->time),
                     (long long int) tindex->byteoffset);
           
-          if ( AddToString (&timeindexstr, keyvalue, ",", 0, 1024) )
+          if ( AddToString (&timeindexstr, tmpstring, ",", 0, 1024) )
             {
 	      fprintf (stderr, "Time index has grown too large: %s\n", timeindexstr);
 	      return -1;
             }
           
           tindex = tindex->next;
+        }
+      
+      /* Create the time spans array:
+       * 'numrange(start1,end1,'[]'),numrange(start2,end2,'[]'),numrange(start3,end3,'[]')...' */
+      if ( sd->spans )
+        {
+          MSTraceID *id;
+          MSTraceSeg *seg;
+          
+          id = sd->spans->traces;
+          while ( id )
+            {
+              if ( sd->spans->numtraces != 1 )
+                {
+                  ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+                  return -1;
+                }
+              
+              seg = id->first;
+              while ( seg )
+                {
+                  snprintf (tmpstring, sizeof(tmpstring), "numrange(%.6f,%.6f,'[]')",
+                            (double) MS_HPTIME2EPOCH(seg->starttime),
+                            (double) MS_HPTIME2EPOCH(seg->endtime));
+                  
+                  if ( AddToString (&timespansstr, tmpstring, ",", 0, 1048576) )
+                    {
+                      fprintf (stderr, "Time span list has grown too large: %s\n", timespansstr);
+                      return -1;
+                    }
+                  
+                  seg = seg->next;
+                }
+              id = id->next;
+            }
         }
       
       updated = (int64_t) scantime;
@@ -645,7 +709,8 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,filemodtime,updated,scanned) "
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c','[%s,%s]',"
-			   "%.6g,'%s',%lld,%lld,'%s',%d,%.6g,'%s',"
+			   "%.6g,'%s',%lld,%lld,'%s',%d,%.6g,"
+                           "'%s',ARRAY[%s],"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,
@@ -657,6 +722,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
 			   sd->segments, sd->gapseconds,
                            timeindexstr,
+                           timespansstr,
 			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
 			   );
 	  
@@ -679,12 +745,18 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 		  sd->segments, sd->gapseconds,
 		  (long long int) updated, (long long int) scantime);
           printf (" TINDEX: '%s'\n", timeindexstr);
+          printf (" TSPANS: '%s'\n", timespansstr);
 	}
       
       if ( timeindexstr )
         {
           free (timeindexstr);
           timeindexstr = NULL;
+        }
+      if ( timespansstr )
+        {
+          free (timespansstr);
+          timespansstr = NULL;
         }
       
       mst = mst->next;
@@ -806,6 +878,7 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
         {
           struct timeindex *tindex = sd->tindex;
           
+          ms_log (0, "Time index:\n");
           while ( tindex )
             {
               snprintf (stime, sizeof(stime), "%.6f", (double) MS_HPTIME2EPOCH(tindex->time) );
@@ -816,6 +889,36 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
               ms_log (0, "  %s (%s) - %lld\n", stime, etime, (long long int)tindex->byteoffset);
               
               tindex = tindex->next;
+            }
+        }
+
+      if ( sd->spans && verbose >= 3 )
+        {
+          MSTraceID *id = 0;
+          MSTraceSeg *seg = 0;
+          
+          if ( sd->spans->numtraces != 1 )
+            ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+          
+          id = sd->spans->traces;
+          while ( id )
+            {
+              ms_log (0, "Span list:\n");
+              
+              seg = id->first;
+              while ( seg )
+                {
+                  if ( ms_hptime2isotimestr (seg->starttime, stime, 1) == NULL )
+                    ms_log (2, "Cannot convert segment start time for %s\n", id->srcname);
+                  
+                  if ( ms_hptime2isotimestr (seg->endtime, etime, 1) == NULL )
+                    ms_log (2, "Cannot convert segment end time for %s\n", id->srcname);
+                  
+                  ms_log (0, "  %s - %s\n", stime, etime);
+                  
+                  seg = seg->next;
+                }
+              id = id->next;
             }
         }
       

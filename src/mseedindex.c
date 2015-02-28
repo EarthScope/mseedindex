@@ -682,7 +682,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   "INSERT INTO %s "
 			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
 			   "VALUES "
-			   "('%s','%s','%s','%s','%c','[%s,%s]',"
+			   "('%s','%s','%s','%s','%c','tstzrange(%s,%s,'[]')',"
 			   "%.6g,'%s',%lld,%lld,'%s',"
                            "'%s',ARRAY[%s],"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",

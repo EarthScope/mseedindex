@@ -1,6 +1,11 @@
 2015.059:
+	- Rework logic to track all conterminous records with the same NSLCQ
+	as a section regardless of time order, each section will be exactly
+	one row in the database.
 	- Add time span tracking for each contiguous NSLCQ section in file,
 	store as array of numrange values (epoch times) in 'timespans' field.
+	- Remove tracking of segment count and gap seconds as these do not
+	work properly when data is not in time order.
 
 2015.057:
 	- Rename to mseedindex from mseedsyncdb.

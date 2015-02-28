@@ -6,13 +6,20 @@
  *
  * The time series are grouped by NSLCQ records that are conterminous
  * in a given file.  Each resulting row in the database represents the
- * earliest and latest time, the number of contiguous segments and the
- * total gap (non-coverage) in seconds from each group.
+ * earliest and latest time, an index of time->byteoffset and a list
+ * of time spans covered by the data.
  *
- * The logic to determine contiguous segments and gap (non-coverage)
- * is expecting the data to be organized into segments ordered by
- * increasing start time.
- * 
+ * The time index is created such that increasing time markers are
+ * always at increasing byte offsets.  This is designed to allow easy
+ * determination of a file read range for a certain time range.  For
+ * the index to represent all data in a conterminous section, the
+ * earliest data time must be first in the section.  If the earliest
+ * data is not first (out-of-order data where the earliest is not
+ * first), the index will set to NULL indicating that the entire
+ * section must be read to cover the entire time range.  As long as
+ * the earliest data is first the index is still appropriate for
+ * out-of-order data.
+ *
  * Expected database schema:
  *
  * Field Name   Type
@@ -23,15 +30,13 @@
  * location     character varying(2)
  * channel      character varying(3)
  * quality      character varying(1)
- * timerange    tstzrange    [timestamps with time zone]
+ * timerange    tstzrange    [range of timestamps with time zone]
  * samplerate   numeric(10,6)
  * filename     character varying(256)
  * byteoffset   numeric(15,0)
  * bytes        numeric(15,0)
  * hash         character varying(64)
- * segments     integer
- * gapseconds   real
- * timeindex    hstore
+ * timeindex    hstore       [time->offset pairs]
  * timespans    numrange[]   [array of numrange values, epoch times]
  * filemodtime  timestamp with time zone
  * updated      timestamp with time zone
@@ -45,8 +50,6 @@
  *
  * modified 2015.059
  ***************************************************************************/
-
-// Enforce increasing version number for data files?
 
 #define _GNU_SOURCE
 #include <stdio.h>
@@ -94,8 +97,6 @@ struct segdetails {
   int64_t endoffset;
   hptime_t earliest;
   hptime_t latest;
-  int32_t segments;
-  double gapseconds;
   md5_state_t digeststate;
   struct timeindex *tindex;
   MSTraceList *spans;
@@ -139,8 +140,6 @@ main (int argc, char **argv)
   
   off_t filepos = 0;
   off_t prevfilepos = 0;
-  
-  flag whence = 0;
   
   /* Set default error message prefix */
   ms_loginit (NULL, NULL, NULL, "ERROR: ");
@@ -247,39 +246,17 @@ main (int argc, char **argv)
 				     NULL, 1, 0, verbose-1)) == MS_NOERROR )
 	{
 	  mst = NULL;
-	  whence = 0;
 	  endtime = msr_endtime(msr);
 	  
+          /* Test if this record matches the current MSTrace */
 	  if ( cmst )
-	    {
-	      mst = mst_findadjacent (flp->mstg, &whence, msr->dataquality,
-				      msr->network, msr->station, msr->location,
-				      msr->channel, msr->samprate, sampratetol,
-				      msr->starttime, endtime, timetol);
-	    }
-	  
-	  /* Exception: check for matching channel records regardless of time */
-	  if ( mst != cmst )
 	    {
 	      mst = mst_findmatch (cmst, msr->dataquality, msr->network, msr->station,
 				   msr->location, msr->channel);
-
-	      /* If a match was found it must be a time tear relative to the current MSTrace */
-	      if ( mst == cmst )
-		{
-		  whence = 1;
-		  
-		  sd = (struct segdetails *)cmst->prvtptr;
-		  sd->segments++;
-		  
-		  /* Determine gap between the latest sample and this record if any */
-		  if ( msr->starttime > sd->latest )
-		    sd->gapseconds += (double) MS_HPTIME2EPOCH((msr->starttime - sd->latest));
-		}
 	    }
 	  
-	  /* Update details of current MSTrace if current record is an extension */
-	  if ( mst == cmst && whence == 1 && filepos == (prevfilepos + msr->reclen) )
+          /* Update details of current MSTrace if current record matches and is next in the file */
+	  if ( mst == cmst && filepos == (prevfilepos + msr->reclen) )
 	    {
 	      if ( msr->samplecnt > 0 )
 		mst_addmsr (cmst, msr, 1);
@@ -293,7 +270,8 @@ main (int argc, char **argv)
 	      if ( endtime > sd->latest )
 		sd->latest = endtime;
 	      
-              /* Add time index if record crosses over the next index time and set next index for 1 hour later */
+              /* Add time index if record crosses over the next index time and set next index for 1 hour later.
+               * The time index will always be increasing in both time and offset. */
 	      if ( endtime > nextindex )
                 {
                   if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
@@ -304,7 +282,7 @@ main (int argc, char **argv)
                     }
                   nextindex += MS_EPOCH2HPTIME(3600);
                 }
-
+              
               /* Add coverage to span list */
               if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
                 {
@@ -345,8 +323,6 @@ main (int argc, char **argv)
 	      sd->endoffset = filepos + msr->reclen - 1;
 	      sd->earliest = msr->starttime;
 	      sd->latest = endtime;
-	      sd->segments = 1;
-	      sd->gapseconds = 0.0;
               
               /* Initialize time index with first entry and set next index for 1 hour later */
 	      if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
@@ -357,7 +333,7 @@ main (int argc, char **argv)
                 }
               nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
               
-              /* Initialize span list and populate */
+              /* Initialize MSTraceList time span list and populate */
               if ( (sd->spans = mstl_init(NULL)) == NULL )
                 {
                   ms_log (2, "Could not allocate MSTraceList, out of memory?\n");
@@ -618,11 +594,9 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       
       bytecount = sd->endoffset - sd->startoffset + 1;
       
-      /* Create earliest and latest time strings with UTC (-00) timezone indicators */
-      ms_hptime2isotimestr (sd->earliest, earliest, 1);
-      strcat (earliest, "-00");
-      ms_hptime2isotimestr (sd->latest, latest, 1);
-      strcat (latest, "-00");
+      /* Create earliest and latest timestamp insertion values */
+      snprintf (earliest, sizeof(earliest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->earliest));
+      snprintf (latest, sizeof(latest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->latest));
       
       /* Create the time index key-value hstore:
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...' */
@@ -706,10 +680,10 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 	  /* Insert new row */
 	  result = PQuery (dbconn,
 			   "INSERT INTO %s "
-			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,segments,gapseconds,timeindex,filemodtime,updated,scanned) "
+			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c','[%s,%s]',"
-			   "%.6g,'%s',%lld,%lld,'%s',%d,%.6g,"
+			   "%.6g,'%s',%lld,%lld,'%s',"
                            "'%s',ARRAY[%s],"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
@@ -720,7 +694,6 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   mst->dataquality,
 			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
-			   sd->segments, sd->gapseconds,
                            timeindexstr,
                            timespansstr,
 			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
@@ -738,11 +711,10 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       /* Print trace line when verbose >=2 or when verbose and nosync */
       if ( verbose >= 2 || (verbose && nosync) )
 	{
-	  ms_log (0, "%s|%s|%s|%s|%c|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%.6g|%lld|%lld\n",
+	  ms_log (0, "%s|%s|%s|%s|%c|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%lld\n",
 		  mst->network, mst->station, mst->location, mst->channel, mst->dataquality,
 		  earliest, latest, mst->samprate, flp->filename,
 		  sd->startoffset, bytecount, digeststr,
-		  sd->segments, sd->gapseconds,
 		  (long long int) updated, (long long int) scantime);
           printf (" TINDEX: '%s'\n", timeindexstr);
           printf (" TSPANS: '%s'\n", timespansstr);
@@ -840,7 +812,7 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
   mst = mstg->traces;
   
   /* Print out header */
-  ms_log (0, "   Source                Earliest sample          Latest sample          Hz  Segments  GapSeconds\n");
+  ms_log (0, "   Source                Earliest sample          Latest sample          Hz\n");
   
   while ( mst )
     {
@@ -871,8 +843,8 @@ Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat )
 	}
       
       /* Print trace info */
-      ms_log (0, "%-17s %-24s %-24s  %-3.3g %-9lld %-g\n",
-	      srcname, stime, etime, mst->samprate, sd->segments, sd->gapseconds);
+      ms_log (0, "%-17s %-24s %-24s  %-3.3g\n",
+	      srcname, stime, etime, mst->samprate);
       
       if ( sd->tindex && verbose >= 3 )
         {

@@ -599,22 +599,33 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       snprintf (earliest, sizeof(earliest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->earliest));
       snprintf (latest, sizeof(latest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->latest));
       
-      /* Create the time index key-value hstore:
-       * 'time1=>offset1,time2=>offset2,time3=>offset3,...' */
+      /* If time index includes the earliest data first create the time index key-value hstore:
+       * 'time1=>offset1,time2=>offset2,time3=>offset3,...' *
+       * Otherwise set the index to NULL as it will not represent the entire time range. */
       tindex = sd->tindex;
-      while ( tindex )
+      if ( tindex )
         {
-          snprintf (tmpstring, sizeof(tmpstring), "%.6f=>%lld",
-                    (double) MS_HPTIME2EPOCH(tindex->time),
-                    (long long int) tindex->byteoffset);
-          
-          if ( AddToString (&timeindexstr, tmpstring, ",", 0, 1024) )
+          if ( tindex->time == sd->earliest )
             {
-	      fprintf (stderr, "Time index has grown too large: %s\n", timeindexstr);
-	      return -1;
+              while ( tindex )
+                {
+                  snprintf (tmpstring, sizeof(tmpstring), "%.6f=>%lld",
+                            (double) MS_HPTIME2EPOCH(tindex->time),
+                            (long long int) tindex->byteoffset);
+                  
+                  if ( AddToString (&timeindexstr, tmpstring, ",", 0, 1024) )
+                    {
+                      fprintf (stderr, "Time index has grown too large: %s\n", timeindexstr);
+                      return -1;
+                    }
+                  
+                  tindex = tindex->next;
+                }
             }
-          
-          tindex = tindex->next;
+          else
+            {
+              timeindexstr = "NULL";
+            }
         }
       
       /* Create the time spans array:

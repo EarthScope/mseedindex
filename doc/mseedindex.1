@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2014/10/6
+.TH MSEEDINDEX 1 2015/02/28
 .SH NAME
 Synchronize Mini-SEED with database schema
 
@@ -8,18 +8,17 @@ mseedindex [options] file1 [file2 file3 ...]
 
 .fi
 .SH DESCRIPTION
-\fBmseedindex\fP reads Mini-SEED, determines contiguous time series
-represented and synchronizes the information with a database.
+\fBmseedindex\fP reads Mini-SEED, determines contigous data sections
+of time series (same network, station, location, channel and quality)
+and synchronizes information about each data section with a database.
 
-A segment is considered contiguous if it forms a continuous series in
-time and in order of records in a given file.  The location of a given
-segment is represented in the database as starting at a byte offset in
-a file and a count of bytes that follow.  Each segment of data is a
-row in the schema.
+The location of a given section is represented in the database as
+starting at a byte offset in a file and a count of bytes that follow.
+Each section of data is a row in the schema.
 
-Data files should be scanned or synchornized when they are in-place.
-The location of the file will be stored for extraction of the data
-later.
+Data files should be scanned or synchornized when they are in-place
+and the full path name should be specified.  The location of the file
+will be stored for extraction of the data.
 
 Any existing rows in the database that match the file being
 synchronized will be replaced during synchronization.  This operation
@@ -65,13 +64,13 @@ process can later remove the older version of the file.
 Once consequence is that no file names should contain a \fB#\fP
 character other than to desginate a file version.
 
-.SH SEGMENT UPDATE TIME
+.SH DATA SECTION UPDATE TIME
 The schema contains fields for storing a hash (MD5) and update time of
-the data records containing a given segment.  When updating existing
-rows the \fBupdated\fP field will only be changed when the hash does not
-match the existing row.  This facilitates tracking of time series
-updates even when archive files are replaced but contain the same
-segments.
+the data records containing a given data section.  When updating
+existing rows the \fBupdated\fP field will only be changed when the
+hash does not match the existing row.  This facilitates tracking of
+time series updates even when archive files are replaced but contain
+the same segments.
 
 The time that the row was last updated is tracked independently in the
 \fBscanned\fP field.

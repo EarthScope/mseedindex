@@ -6,6 +6,9 @@
 	store as array of numrange values (epoch times) in 'timespans' field.
 	- Remove tracking of segment count and gap seconds as these do not
 	work properly when data is not in time order.
+	- Set time index to NULL when the earliest data in a given section is
+	not represented in the index.  It would not be usable to indentify
+	a contiguous read range including all data.
 
 2015.057:
 	- Rename to mseedindex from mseedsyncdb.

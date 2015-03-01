@@ -4,6 +4,7 @@
 	one row in the database.
 	- Add time span tracking for each contiguous NSLCQ section in file,
 	store as array of numrange values (epoch times) in 'timespans' field.
+	Data with a sample rate of zero is not included in the time span list.
 	- Remove tracking of segment count and gap seconds as these do not
 	work properly when data is not in time order.
 	- Set time index to NULL when the earliest data in a given section is

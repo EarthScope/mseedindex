@@ -284,13 +284,16 @@ main (int argc, char **argv)
                   nextindex += MS_EPOCH2HPTIME(3600);
                 }
               
-              /* Add coverage to span list */
-              if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+              /* Add coverage to span list if sample rate is non-zero */
+              if ( msr->samprate )
                 {
-                  ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
-                  if ( dbconn )
-                    PQfinish (dbconn);
-                  exit (1);
+                  if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+                    {
+                      ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+                      if ( dbconn )
+                        PQfinish (dbconn);
+                      exit (1);
+                    }
                 }
               
 	      md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
@@ -603,7 +606,6 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...' *
        * Otherwise set the index to NULL as it will not represent the entire time range. */
       tindex = sd->tindex;
-      timeindexstr = NULL;
       if ( tindex && tindex->time == sd->earliest )
         {
           char *indexstr = NULL;
@@ -622,11 +624,13 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
               
               tindex = tindex->next;
             }
-
-            /* Add single quotes to make it a string for the database */
-            asprintf (&timeindexstr, "'%s'", indexstr);
-            if ( indexstr )
+          
+          /* Add single quotes to make a string for the database */
+          if ( indexstr )
+            {
+              asprintf (&timeindexstr, "'%s'", indexstr);
               free (indexstr);
+            }
         }
      
       /* Create the time spans array:
@@ -635,6 +639,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
         {
           MSTraceID *id;
           MSTraceSeg *seg;
+          char *spansstr = NULL;
           
           id = sd->spans->traces;
           while ( id )
@@ -652,15 +657,22 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
                             (double) MS_HPTIME2EPOCH(seg->starttime),
                             (double) MS_HPTIME2EPOCH(seg->endtime));
                   
-                  if ( AddToString (&timespansstr, tmpstring, ",", 0, 1048576) )
+                  if ( AddToString (&spansstr, tmpstring, ",", 0, 1048576) )
                     {
-                      fprintf (stderr, "Time span list has grown too large: %s\n", timespansstr);
+                      fprintf (stderr, "Time span list has grown too large: %s\n", spansstr);
                       return -1;
                     }
                   
                   seg = seg->next;
                 }
               id = id->next;
+            }
+          
+          /* Add Array declaration for the database */
+          if ( spansstr )
+            {
+              asprintf (&timespansstr, "ARRAY[%s]", spansstr);
+              free (spansstr);
             }
         }
       
@@ -697,7 +709,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c',tstzrange(%s,%s,'[]'),"
 			   "%.6g,'%s',%lld,%lld,'%s',"
-                           "%s,ARRAY[%s],"
+                           "%s,%s,"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,
@@ -708,7 +720,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
                            (timeindexstr) ? timeindexstr : "NULL",
-                           timespansstr,
+                           (timespansstr) ? timespansstr : "NULL",
 			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
 			   );
 	  

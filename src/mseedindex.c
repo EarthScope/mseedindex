@@ -346,12 +346,16 @@ main (int argc, char **argv)
                   exit (1);
                 }
               
-              if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+              /* Add coverage to span list if sample rate is non-zero */
+              if ( msr->samprate )
                 {
-                  ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
-                  if ( dbconn )
-                    PQfinish (dbconn);
-                  exit (1);
+                  if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
+                    {
+                      ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+                      if ( dbconn )
+                        PQfinish (dbconn);
+                      exit (1);
+                    }
                 }
               
               /* Initialize MD5 calculation state */

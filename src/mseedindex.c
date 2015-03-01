@@ -603,31 +603,32 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...' *
        * Otherwise set the index to NULL as it will not represent the entire time range. */
       tindex = sd->tindex;
-      if ( tindex )
+      timeindexstr = NULL;
+      if ( tindex && tindex->time == sd->earliest )
         {
-          if ( tindex->time == sd->earliest )
+          char *indexstr = NULL;
+
+          while ( tindex )
             {
-              while ( tindex )
+              snprintf (tmpstring, sizeof(tmpstring), "%.6f=>%lld",
+                        (double) MS_HPTIME2EPOCH(tindex->time),
+                        (long long int) tindex->byteoffset);
+                  
+              if ( AddToString (&indexstr, tmpstring, ",", 0, 1024) )
                 {
-                  snprintf (tmpstring, sizeof(tmpstring), "%.6f=>%lld",
-                            (double) MS_HPTIME2EPOCH(tindex->time),
-                            (long long int) tindex->byteoffset);
-                  
-                  if ( AddToString (&timeindexstr, tmpstring, ",", 0, 1024) )
-                    {
-                      fprintf (stderr, "Time index has grown too large: %s\n", timeindexstr);
-                      return -1;
-                    }
-                  
-                  tindex = tindex->next;
+                  fprintf (stderr, "Time index has grown too large: %s\n", indexstr);
+                  return -1;
                 }
+              
+              tindex = tindex->next;
             }
-          else
-            {
-              timeindexstr = "NULL";
-            }
+
+            /* Add single quotes to make it a string for the database */
+            asprintf (&timeindexstr, "'%s'", indexstr);
+            if ( indexstr )
+              free (indexstr);
         }
-      
+     
       /* Create the time spans array:
        * 'numrange(start1,end1,'[]'),numrange(start2,end2,'[]'),numrange(start3,end3,'[]')...' */
       if ( sd->spans )
@@ -696,7 +697,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   "VALUES "
 			   "('%s','%s','%s','%s','%c',tstzrange(%s,%s,'[]'),"
 			   "%.6g,'%s',%lld,%lld,'%s',"
-                           "'%s',ARRAY[%s],"
+                           "%s,ARRAY[%s],"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
 			   dbtable,
 			   mst->network,
@@ -706,7 +707,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   mst->dataquality,
 			   earliest, latest,
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
-                           timeindexstr,
+                           (timeindexstr) ? timeindexstr : "NULL",
                            timespansstr,
 			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
 			   );

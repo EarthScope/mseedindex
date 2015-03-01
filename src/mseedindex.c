@@ -85,7 +85,7 @@ static char   *dbport       = "5444";
 static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
 static char   *dbpass       = "timeseries";
-static char   *dbtable      = "timeseries.tsextents"; /* With schema */
+static char   *dbtable      = "timeseries.tsindex"; /* With schema */
 
 struct timeindex {
   hptime_t time;

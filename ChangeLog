@@ -1,4 +1,8 @@
-2015.059:
+2015.060: 0.91
+	- Set data section update time to file modification time instead of
+	the scan time when not retaining an existing entry.
+
+2015.059: 0.9
 	- Rework logic to track all conterminous records with the same NSLCQ
 	as a section regardless of time order, each section will be exactly
 	one row in the database.

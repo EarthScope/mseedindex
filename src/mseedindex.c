@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.059
+ * modified 2015.060
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.9"
+#define VERSION "0.91"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -684,7 +684,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       
       if ( dbconn )
 	{
-	  int64_t updated = (int64_t) scantime;
+	  int64_t updated = (int64_t) flp->filemodtime;
           
 	  /* Search for matching trace entry to retain updated time if hash has not changed */
 	  if ( matchresult )

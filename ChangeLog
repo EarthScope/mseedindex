@@ -1,3 +1,6 @@
+2015.062:
+	- Update libmseed to 2.14.
+
 2015.060: 0.91
 	- Set data section update time to file modification time instead of
 	the scan time when not retaining an existing entry.

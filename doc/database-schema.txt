@@ -1,0 +1,46 @@
+
+CREATE TABLE timeseries.tsindex
+(
+  id serial,
+  network character varying(2) NOT NULL,
+  station character varying(5) NOT NULL,
+  location character varying(2) NOT NULL,
+  channel character varying(3) NOT NULL,
+  quality character varying(1) NOT NULL,
+  timerange tstzrange,
+  samplerate numeric(10,6) NOT NULL,
+  filename character varying(256) NOT NULL,
+  byteoffset numeric(15,0) NOT NULL,
+  bytes numeric(15,0) NOT NULL,
+  hash character varying(64),
+  timeindex hstore,
+  timespans numrange[],
+  filemodtime timestamp with time zone NOT NULL,
+  updated timestamp with time zone NOT NULL,
+  scanned timestamp with time zone NOT NULL
+)
+WITH (
+  OIDS=FALSE
+);
+ALTER TABLE timeseries.tsindex
+  OWNER TO timeseries;
+
+CREATE INDEX tsindex_filename_idx
+  ON timeseries.tsindex
+  USING btree
+  (filename);
+
+CREATE INDEX tsindex_nslcq_idx
+  ON timeseries.tsindex
+  USING btree
+  (network, station, location, channel, quality);
+
+CREATE INDEX tsindex_timerange_idx
+  ON timeseries.tsindex
+  USING gist
+  (timerange);
+
+CREATE INDEX tsindex_updated_idx
+  ON timeseries.tsindex
+  USING btree
+  (updated);

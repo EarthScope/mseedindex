@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.060
+ * modified 2015.062
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "0.91"
+#define VERSION "1.0"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -148,6 +148,9 @@ main (int argc, char **argv)
   /* Process given parameters (command line and parameter file) */
   if ( ProcessParam (argc, argv) < 0 )
     return 1;
+  
+  /* Read leap second list file at known location */
+  ms_readleapsecondfile ("/opt/dmc/share/leap-seconds.list");
   
   if ( ! nosync )
     {

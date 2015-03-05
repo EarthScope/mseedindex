@@ -35,8 +35,8 @@ During synchronization, all existing rows associated with the file
 being scanned will be deleted and new rows representing the current
 file will be inserted, effectively replacing all rows for a given file.
 
-This situation leads to a timing issues if data file
-replacement/synchronization and data extraction are occuring at the
+This situation leads to a timing issue if data file
+replacement/synchronization and data extraction are occurring at the
 same time.  To avoid this race condition \fBmseedindex\fP supports
 the following:
 

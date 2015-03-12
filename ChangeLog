@@ -1,3 +1,6 @@
+2015.071:
+	- Update libmseed to 2.15.
+
 2015.062: 1.0
 	- Update libmseed to 2.14.
 	- Read leap second list file from /opt/dmc/share/leap-seconds.list

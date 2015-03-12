@@ -1,5 +1,10 @@
-2015.071:
+2015.071: 1.1
 	- Update libmseed to 2.15.
+	- Reset previous file position for each file.
+	- Track whether records in a data section are in time order and set
+	a 'latest' flag in the time index based on ordering.  If the records
+	are in time order then the index also indicates the byte offest of the
+	latest timed data.
 
 2015.062: 1.0
 	- Update libmseed to 2.14.

@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.062
+ * modified 2015.071
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.0"
+#define VERSION "1.1"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -99,6 +99,7 @@ struct sectiondetails {
   hptime_t earliest;
   hptime_t latest;
   md5_state_t digeststate;
+  int timeorderrecords;
   struct timeindex *tindex;
   MSTraceList *spans;
 };
@@ -135,6 +136,7 @@ main (int argc, char **argv)
   MSTrace *cmst = NULL;
   hptime_t endtime = HPTERROR;
   hptime_t nextindex = HPTERROR;
+  hptime_t prevstarttime = HPTERROR;
   int retcode = MS_NOERROR;
   time_t scantime;
   struct stat st;
@@ -244,6 +246,8 @@ main (int argc, char **argv)
       flp->filemodtime = st.st_mtime;
       cmst = NULL;
       scantime = time (NULL);
+      prevfilepos = 0;
+      prevstarttime = HPTERROR;
       
       /* Read records from the input file */
       while ( (retcode = ms_readmsr (&msr, flp->filename, -1, &filepos,
@@ -273,7 +277,11 @@ main (int argc, char **argv)
 		sd->earliest = msr->starttime;
 	      if ( endtime > sd->latest )
 		sd->latest = endtime;
-	      
+
+              /* Unset time order record indicator if not in time order */
+              if ( msr->starttime <= prevstarttime )
+                sd->timeorderrecords = 0;
+              
               /* Add time index if record crosses over the next index time and set next index for 1 hour later.
                * The time index will always be increasing in both time and offset. */
 	      if ( endtime > nextindex )
@@ -330,6 +338,7 @@ main (int argc, char **argv)
 	      sd->endoffset = filepos + msr->reclen - 1;
 	      sd->earliest = msr->starttime;
 	      sd->latest = endtime;
+              sd->timeorderrecords = 1;  /* By default records are assumed to be in order */
               
               /* Initialize time index with first entry and set next index for 1 hour later */
 	      if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
@@ -368,6 +377,7 @@ main (int argc, char **argv)
 	    }
 	  
 	  prevfilepos = filepos;
+          prevstarttime = msr->starttime;
 	} /* Done reading records */
       
       /* Print error if not EOF */
@@ -610,7 +620,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
       snprintf (latest, sizeof(latest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->latest));
       
       /* If time index includes the earliest data first create the time index key-value hstore:
-       * 'time1=>offset1,time2=>offset2,time3=>offset3,...' *
+       * 'time1=>offset1,time2=>offset2,time3=>offset3,...,latest=>[0|1]' *
        * Otherwise set the index to NULL as it will not represent the entire time range. */
       tindex = sd->tindex;
       if ( tindex && tindex->time == sd->earliest )
@@ -630,6 +640,17 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
                 }
               
               tindex = tindex->next;
+            }
+
+          /* Add 'latest' indicator to time index.  If the data section contains data
+           * records only in progressing time order, then the index also identifies
+           * offsets to the latest data. */
+          snprintf (tmpstring, sizeof(tmpstring), "latest=>%d", sd->timeorderrecords);
+          
+          if ( AddToString (&indexstr, tmpstring, ",", 0, 1024) )
+            {
+              fprintf (stderr, "Time index has grown too large: %s\n", indexstr);
+              return -1;
             }
           
           /* Add single quotes to make a string for the database */

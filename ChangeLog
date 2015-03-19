@@ -1,3 +1,9 @@
+2015.078: 1.2
+	- Separate file reading and database synchronization into different loops.
+	- Only connect to the database after all input files have been read.
+	This avoids holding a database connection open while data files are read
+	and reduces the connection time needed.
+
 2015.071: 1.1
 	- Update libmseed to 2.15.
 	- Reset previous file position for each file.

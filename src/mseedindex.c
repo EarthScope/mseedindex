@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.071
+ * modified 2015.078
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.1"
+#define VERSION "1.2"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -107,6 +107,7 @@ struct sectiondetails {
 struct filelink {
   char *filename;
   time_t filemodtime;
+  time_t scantime;
   MSTraceGroup *mstg;
   struct filelink *next;
 };
@@ -115,7 +116,7 @@ struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
 struct timeindex *AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
-static int SyncFileSeries (struct filelink *flp, time_t scantime);
+static int SyncFileSeries (struct filelink *flp);
 static PGresult *PQuery (PGconn *pgdb, const char *format, ...);
 void Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
 static int ProcessParam (int argcount, char **argvec);
@@ -138,7 +139,6 @@ main (int argc, char **argv)
   hptime_t nextindex = HPTERROR;
   hptime_t prevstarttime = HPTERROR;
   int retcode = MS_NOERROR;
-  time_t scantime;
   struct stat st;
   
   off_t filepos = 0;
@@ -153,74 +153,8 @@ main (int argc, char **argv)
   
   /* Read leap second list file at known location */
   ms_readleapsecondfile ("/opt/dmc/share/leap-seconds.list");
-  
-  if ( ! nosync )
-    {
-      const char *keywords[7];
-      const char *values[7];
-      
-      keywords[0] = "host";
-      values[0] = dbhost;
-      keywords[1] = "port";
-      values[1] = dbport;
-      keywords[2] = "user";
-      values[2] = dbuser;
-      keywords[3] = "password";
-      values[3] = dbpass;
-      keywords[4] = "dbname";
-      values[4] = dbname;
-      keywords[5] = "fallback_application_name";
-      values[5] = PACKAGE;
-      keywords[6] = NULL;
-      values[6] = NULL;
-      
-      dbconn = PQconnectdbParams(keywords, values, 1);
-      
-      if ( ! dbconn )
-	{
-	  ms_log (2, "PQconnectdb returned NULL, connection failed");
-	  exit (1);
-	}
-
-      if ( dbconntrace )
-	{
-          PQtrace (dbconn, stderr);
-        }
-      
-      if ( PQstatus(dbconn) != CONNECTION_OK )
-	{
-	  ms_log (2, "Connection to database failed: %s", PQerrorMessage(dbconn));
-	  PQfinish (dbconn);
-	  exit (1);
-	}
-      
-      if ( verbose )
-	{
-	  int sver = PQserverVersion(dbconn);
-	  int major, minor, less;
-	  major = sver/10000;
-	  minor = sver/100 - major*100;
-	  less = sver - major*10000 - minor*100;
-	  
-	  ms_log (1, "Connected to database %s on host %s (server %d.%d.%d)\n",
-		  PQdb(dbconn), PQhost(dbconn),
-		  major, minor, less);
-	}
-      
-      /* Set session timezone to 'UTC' */
-      result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
-      if ( PQresultStatus(result) != PGRES_COMMAND_OK )
-	{
-	  ms_log (2, "SET timezone command failed: %s", PQerrorMessage(dbconn));
-	  PQclear (result);
-	  exit (1);
-	}
-      PQclear (result);
-      
-      if ( verbose )
-	ms_log (1, "Set database session timezone to UTC\n");
-    } /* End of ! nosync */
-  
+    
+  /* Read files and accumulate indexing details */
   flp = filelist;
   while ( flp )
     {
@@ -244,8 +178,8 @@ main (int argc, char **argv)
         }
       
       flp->filemodtime = st.st_mtime;
+      flp->scantime = time (NULL);
       cmst = NULL;
-      scantime = time (NULL);
       prevfilepos = 0;
       prevstarttime = HPTERROR;
       
@@ -400,8 +334,83 @@ main (int argc, char **argv)
 	  Local_mst_printtracelist (flp->mstg, 1);
 	}
       
+      flp = flp->next;
+    } /* End of looping over file list for reading */
+  
+  /* Connect to database */
+  if ( ! nosync )
+    {
+      const char *keywords[7];
+      const char *values[7];
+      
+      keywords[0] = "host";
+      values[0] = dbhost;
+      keywords[1] = "port";
+      values[1] = dbport;
+      keywords[2] = "user";
+      values[2] = dbuser;
+      keywords[3] = "password";
+      values[3] = dbpass;
+      keywords[4] = "dbname";
+      values[4] = dbname;
+      keywords[5] = "fallback_application_name";
+      values[5] = PACKAGE;
+      keywords[6] = NULL;
+      values[6] = NULL;
+      
+      dbconn = PQconnectdbParams(keywords, values, 1);
+      
+      if ( ! dbconn )
+	{
+	  ms_log (2, "PQconnectdb returned NULL, connection failed");
+	  exit (1);
+	}
+
+      if ( dbconntrace )
+	{
+          PQtrace (dbconn, stderr);
+        }
+      
+      if ( PQstatus(dbconn) != CONNECTION_OK )
+	{
+	  ms_log (2, "Connection to database failed: %s", PQerrorMessage(dbconn));
+	  PQfinish (dbconn);
+	  exit (1);
+	}
+      
+      if ( verbose )
+	{
+	  int sver = PQserverVersion(dbconn);
+	  int major, minor, less;
+	  major = sver/10000;
+	  minor = sver/100 - major*100;
+	  less = sver - major*10000 - minor*100;
+	  
+	  ms_log (1, "Connected to database %s on host %s (server %d.%d.%d)\n",
+		  PQdb(dbconn), PQhost(dbconn),
+		  major, minor, less);
+	}
+      
+      /* Set session timezone to 'UTC' */
+      result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
+      if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+	{
+	  ms_log (2, "SET timezone command failed: %s", PQerrorMessage(dbconn));
+	  PQclear (result);
+	  exit (1);
+	}
+      PQclear (result);
+      
+      if ( verbose )
+	ms_log (1, "Set database session timezone to UTC\n");
+    } /* End of ! nosync */
+
+  /* Synchronize indexing details with database */
+  flp = filelist;
+  while ( flp )
+    {
       /* Sync time series listing */
-      if ( SyncFileSeries (flp, scantime) )
+      if ( SyncFileSeries (flp) )
 	{
 	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
           if ( dbconn )
@@ -410,7 +419,7 @@ main (int argc, char **argv)
 	}
       
       flp = flp->next;
-    } /* End of looping over file list */
+    } /* End of looping over file list for synchronization */
   
   if ( dbconn )
     {
@@ -483,7 +492,7 @@ AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static int
-SyncFileSeries (struct filelink *flp, time_t scantime)
+SyncFileSeries (struct filelink *flp)
 {
   PGresult *result = NULL;
   PGresult *matchresult = NULL;
@@ -704,7 +713,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
             }
         }
       
-      updated = (int64_t) scantime;
+      updated = (int64_t) flp->scantime;
       
       if ( dbconn )
 	{
@@ -749,7 +758,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 			   mst->samprate, flp->filename, sd->startoffset, bytecount, digeststr,
                            (timeindexstr) ? timeindexstr : "NULL",
                            (timespansstr) ? timespansstr : "NULL",
-			   (long long int) flp->filemodtime, (long long int) updated, (long long int) scantime
+			   (long long int) flp->filemodtime, (long long int) updated, (long long int) flp->scantime
 			   );
 	  
 	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
@@ -768,7 +777,7 @@ SyncFileSeries (struct filelink *flp, time_t scantime)
 		  mst->network, mst->station, mst->location, mst->channel, mst->dataquality,
 		  earliest, latest, mst->samprate, flp->filename,
 		  sd->startoffset, bytecount, digeststr,
-		  (long long int) updated, (long long int) scantime);
+		  (long long int) updated, (long long int) flp->scantime);
           printf (" TINDEX: '%s'\n", timeindexstr);
           printf (" TSPANS: '%s'\n", timespansstr);
 	}
@@ -1119,7 +1128,7 @@ AddFile (char *filename)
       return -1;
     }
   
-  if ( ! (newlp = malloc (sizeof (struct filelink))) )
+  if ( ! (newlp = calloc (1, sizeof (struct filelink))) )
     {
       ms_log (2, "AddFile(): Cannot allocate memory\n");
       return -1;

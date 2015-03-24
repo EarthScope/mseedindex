@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.078
+ * modified 2015.082
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.2"
+#define VERSION "1.3"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -226,7 +226,9 @@ main (int argc, char **argv)
                         PQfinish (dbconn);
                       exit (1);
                     }
-                  nextindex += MS_EPOCH2HPTIME(3600);
+                  
+                  while ( nextindex < endtime )
+                    nextindex += MS_EPOCH2HPTIME(3600);
                 }
               
               /* Add coverage to span list if sample rate is non-zero */
@@ -281,7 +283,10 @@ main (int argc, char **argv)
                     PQfinish (dbconn);
                   exit (1);
                 }
+              
               nextindex = cmst->starttime + MS_EPOCH2HPTIME(3600);
+              while ( nextindex < endtime )
+                nextindex += MS_EPOCH2HPTIME(3600);
               
               /* Initialize MSTraceList time span list and populate */
               if ( (sd->spans = mstl_init(NULL)) == NULL )

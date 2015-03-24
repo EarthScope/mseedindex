@@ -1,3 +1,7 @@
+2105.082: 1.3
+	- Fix logic of tracking next time index boundary to guarantee that the
+	index time and offset are only increasing.
+
 2015.078: 1.2
 	- Separate file reading and database synchronization into different loops.
 	- Only connect to the database after all input files have been read.

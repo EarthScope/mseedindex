@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.082
+ * modified 2015.086
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.3"
+#define VERSION "1.4"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -647,7 +647,7 @@ SyncFileSeries (struct filelink *flp)
                         (double) MS_HPTIME2EPOCH(tindex->time),
                         (long long int) tindex->byteoffset);
                   
-              if ( AddToString (&indexstr, tmpstring, ",", 0, 1024) )
+              if ( AddToString (&indexstr, tmpstring, ",", 0, 4096) )
                 {
                   fprintf (stderr, "Time index has grown too large: %s\n", indexstr);
                   return -1;
@@ -661,7 +661,7 @@ SyncFileSeries (struct filelink *flp)
            * offsets to the latest data. */
           snprintf (tmpstring, sizeof(tmpstring), "latest=>%d", sd->timeorderrecords);
           
-          if ( AddToString (&indexstr, tmpstring, ",", 0, 1024) )
+          if ( AddToString (&indexstr, tmpstring, ",", 0, 4096) )
             {
               fprintf (stderr, "Time index has grown too large: %s\n", indexstr);
               return -1;
@@ -699,7 +699,7 @@ SyncFileSeries (struct filelink *flp)
                             (double) MS_HPTIME2EPOCH(seg->starttime),
                             (double) MS_HPTIME2EPOCH(seg->endtime));
                   
-                  if ( AddToString (&spansstr, tmpstring, ",", 0, 1048576) )
+                  if ( AddToString (&spansstr, tmpstring, ",", 0, 4194304) )
                     {
                       fprintf (stderr, "Time span list has grown too large: %s\n", spansstr);
                       return -1;

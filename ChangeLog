@@ -1,3 +1,7 @@
+2015.088: 1.5
+	- Increase maximum size of buffers allowed for the string representation
+	of the time spans (4 MiB to 8 MiB).
+
 2015.086: 1.4
 	- Increase maximum size of buffers allowed for the string representation
 	of the time index (1 KB to 4 KB) and time spans (1 MiB to 4 MiB).

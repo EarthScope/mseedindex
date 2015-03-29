@@ -49,7 +49,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.086
+ * modified 2015.088
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -69,7 +69,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.4"
+#define VERSION "1.5"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -699,7 +699,7 @@ SyncFileSeries (struct filelink *flp)
                             (double) MS_HPTIME2EPOCH(seg->starttime),
                             (double) MS_HPTIME2EPOCH(seg->endtime));
                   
-                  if ( AddToString (&spansstr, tmpstring, ",", 0, 4194304) )
+                  if ( AddToString (&spansstr, tmpstring, ",", 0, 8388608) )
                     {
                       fprintf (stderr, "Time span list has grown too large: %s\n", spansstr);
                       return -1;

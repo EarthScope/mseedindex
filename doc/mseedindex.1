@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2015/03/03
+.TH MSEEDINDEX 1 2015/05/02
 .SH NAME
 Synchronize Mini-SEED with database schema
 
@@ -16,9 +16,9 @@ The location of a given section is represented in the database as
 starting at a byte offset in a file and a count of bytes that follow.
 Each section of data is a row in the schema.
 
-Data files should be scanned or synchornized when they are in-place
-and the full path name should be specified.  The location of the file
-will be stored for extraction of the data.
+Data files should be scanned or synchornized when they are in-place.
+By default the absolute path to each input file will be resolved and
+stored.
 
 Any existing rows in the database that match the file being
 synchronized will be replaced during synchronization.  This operation
@@ -118,6 +118,10 @@ Specify a sample rate tolerance for constructing continous trace
 segments. The tolerance is specified as the difference between two
 sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) <
 0.0001).
+
+.IP "-kp       "
+Keep the original file paths as specified.  By default the absolute,
+canonical path to each file is determiend and stored in the database.
 
 .SH "INPUT LIST FILE"
 A list file can be used to specify input files, one file per line.

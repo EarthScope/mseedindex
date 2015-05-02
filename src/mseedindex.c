@@ -50,7 +50,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.088
+ * modified 2015.122
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -61,6 +61,7 @@
 #include <time.h>
 #include <sys/stat.h>
 #include <errno.h>
+#include <limits.h>
 #include <ctype.h>
 #include <regex.h>
 
@@ -70,13 +71,14 @@
 
 #include "md5.h"
 
-#define VERSION "1.6dev"
+#define VERSION "1.6"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
 static flag    verbose      = 0;
 static double  timetol      = -1.0; /* Time tolerance for continuous traces */
 static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous traces */
+static char    keeppath     = 0;    /* Use originally specified path, do not resolve absolute */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
 static PGconn *dbconn       = NULL; /* Database connection */
@@ -124,6 +126,7 @@ static int ProcessParam (int argcount, char **argvec);
 static char *GetOptValue (int argcount, char **argvec, int argopt);
 static int AddFile (char *filename);
 static int AddListFile (char *filename);
+static int ResolveFilePaths (void);
 int AddToString (char **string, char *add, char* delim, int where, int maxlen);
 static void Usage (void);
 
@@ -151,6 +154,11 @@ main (int argc, char **argv)
   /* Process given parameters (command line and parameter file) */
   if ( ProcessParam (argc, argv) < 0 )
     return 1;
+  
+  /* Resolve absolute file paths if not keeping original paths */
+  if ( ! keeppath )
+    if ( ResolveFilePaths() )
+      return 1;
   
   /* Read leap second list file at known location */
   ms_readleapsecondfile ("/opt/dmc/share/leap-seconds.list");
@@ -1033,6 +1041,10 @@ ProcessParam (int argcount, char **argvec)
 	{
 	  sampratetol = strtod (GetOptValue(argcount, argvec, optind++), NULL);
 	}
+      else if (strncmp (argvec[optind], "-kp", 3) == 0)
+	{
+	  keeppath = 1;
+	}
       else if (strncmp (argvec[optind], "-", 1) == 0 &&
 	       strlen (argvec[optind]) > 1 )
 	{
@@ -1140,7 +1152,7 @@ AddFile (char *filename)
       ms_log (2, "AddFile(): Cannot allocate memory\n");
       return -1;
     }
-
+  
   if ( ! (newlp->filename = strdup(filename)) )
     {
       ms_log (2, "AddFile(): Cannot duplicate filename string\n");
@@ -1218,6 +1230,46 @@ AddListFile (char *filename)
   
   return filecount;
 }  /* End of AddListFile() */
+
+
+/***************************************************************************
+ * ResolveFilePaths:
+ *
+ * Iterate through the global file list (filelist) and resolve full paths.
+ *
+ * Returns 0 on success and -1 on error.
+ ***************************************************************************/
+static int
+ResolveFilePaths (void)
+{
+  struct filelink *filelp;
+  char abspath[PATH_MAX];
+  
+  filelp = filelist;
+  while ( filelp )
+    {
+      if ( realpath(filelp->filename, abspath) )
+        {
+          free (filelp->filename);
+          
+          if ( ! (filelp->filename = strdup(abspath)) )
+            {
+              ms_log (2, "ResolveFilePaths(): Cannot duplicate filename string\n");
+              return -1;
+            }
+        }
+      else
+        {
+          ms_log (2, "ResolveFilePaths(): Error realpath(): %s\n",
+                  strerror(errno));
+          return -1;
+        }
+      
+      filelp = filelp->next;
+    }
+  
+  return 0;
+}  /* End of ResolveFilePaths() */
 
 
 /***************************************************************************
@@ -1319,6 +1371,8 @@ Usage (void)
 	   "\n"
 	   " -tt secs       Specify a time tolerance for continuous traces\n"
 	   " -rt diff       Specify a sample rate tolerance for continuous traces\n"
+	   "\n"
+	   " -kp            Keep original paths, by default absolute paths are stored\n"
 	   "\n"
 	   " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
 	   "\n", dbtable, dbhost, dbport, dbuser, dbpass, dbname);

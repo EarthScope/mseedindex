@@ -1,6 +1,8 @@
-2015.122:
+2015.122: 1.6
 	- Update libmseed to 2.16.
 	- Database schema change: replace timerange field with starttime,endtime
+	- Resolve absolute paths for input files and store them by default.  A new
+	command line option of '-kp' can be used to keep the original paths.
 
 2015.088: 1.5
 	- Increase maximum size of buffer allowed for the string representation

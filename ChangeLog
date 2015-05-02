@@ -1,3 +1,6 @@
+2015.122:
+	- Update libmseed to 2.16.
+
 2015.088: 1.5
 	- Increase maximum size of buffer allowed for the string representation
 	of the time spans (4 MiB to 8 MiB). Sufficient for 200,000+ spans.

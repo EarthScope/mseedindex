@@ -1,5 +1,6 @@
 2015.122:
 	- Update libmseed to 2.16.
+	- Database schema change: replace timerange field with starttime,endtime
 
 2015.088: 1.5
 	- Increase maximum size of buffer allowed for the string representation

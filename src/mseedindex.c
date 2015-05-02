@@ -31,7 +31,8 @@
  * location     character varying(2)
  * channel      character varying(3)
  * quality      character varying(1)
- * timerange    tstzrange    [range of timestamps with time zone]
+ * starttime    timestamp with time zone [earliest sample time]
+ * endtime      timestamp with time zone [latest sample time]
  * samplerate   numeric(10,6)
  * filename     character varying(256)
  * byteoffset   numeric(15,0)
@@ -69,7 +70,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.5"
+#define VERSION "1.6dev"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -629,9 +630,9 @@ SyncFileSeries (struct filelink *flp)
       
       bytecount = sd->endoffset - sd->startoffset + 1;
       
-      /* Create earliest and latest timestamp insertion values */
-      snprintf (earliest, sizeof(earliest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->earliest));
-      snprintf (latest, sizeof(latest), "to_timestamp(%.6f)", (double) MS_HPTIME2EPOCH(sd->latest));
+      /* Create earliest and latest epoch time strings, rounding to microseconds */
+      snprintf (earliest, sizeof(earliest), "%.6f", (double) MS_HPTIME2EPOCH(sd->earliest));
+      snprintf (latest, sizeof(latest), "%.6f", (double) MS_HPTIME2EPOCH(sd->latest));
       
       /* If time index includes the earliest data first create the time index key-value hstore:
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...,latest=>[0|1]' *
@@ -695,6 +696,7 @@ SyncFileSeries (struct filelink *flp)
               seg = id->first;
               while ( seg )
                 {
+                  /* Create number range value, rounding epoch times to microseconds */
                   snprintf (tmpstring, sizeof(tmpstring), "numrange(%.6f,%.6f,'[]')",
                             (double) MS_HPTIME2EPOCH(seg->starttime),
                             (double) MS_HPTIME2EPOCH(seg->endtime));
@@ -747,9 +749,9 @@ SyncFileSeries (struct filelink *flp)
 	  /* Insert new row */
 	  result = PQuery (dbconn,
 			   "INSERT INTO %s "
-			   "(network,station,location,channel,quality,timerange,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
+			   "(network,station,location,channel,quality,starttime,endtime,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
 			   "VALUES "
-			   "('%s','%s','%s','%s','%c',tstzrange(%s,%s,'[]'),"
+			   "('%s','%s','%s','%s','%c',to_timestamp(%s),to_timestamp(%s),"
 			   "%.6g,'%s',%lld,%lld,'%s',"
                            "%s,%s,"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",

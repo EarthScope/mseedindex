@@ -50,7 +50,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2015.122
+ * modified 2016.169
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -71,7 +71,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.6"
+#define VERSION "1.7"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;
@@ -558,10 +558,44 @@ SyncFileSeries (struct filelink *flp)
   /* Search database for rows matching the filename or a version of the filename */
   if ( dbconn )
     {
+      hptime_t fileearliest = HPTERROR;
+      hptime_t filelatest = HPTERROR;
+      
+      /* Determine earliest and latest times for the file */
+      mst = flp->mstg->traces;
+      while ( mst )
+        {
+          sd = (struct sectiondetails *)mst->prvtptr;
+          
+          if ( sd )
+            {
+              if ( fileearliest == HPTERROR || fileearliest > sd->earliest )
+                fileearliest = sd->earliest;
+              if ( filelatest == HPTERROR || filelatest < sd->latest )
+                filelatest = sd->latest;
+            }
+          
+          mst = mst->next;
+        }
+      
+      if ( fileearliest == HPTERROR || filelatest == HPTERROR )
+	{
+	  ms_log (2, "No time coverage found for %s\n", flp->filename);
+	  return -1;
+	}
+      
+      /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
+       * Include criteria to match an overlapping time range of extents, which can be used by the database. */
       if ( baselength > 0 )
-	asprintf (&filewhere, "filename like '%.*s%%'", baselength, flp->filename);
+	asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                  baselength, flp->filename,
+                  (double) MS_HPTIME2EPOCH(filelatest),
+                  (double) MS_HPTIME2EPOCH(fileearliest));
       else
-	asprintf (&filewhere, "filename='%s'", flp->filename);
+	asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                  flp->filename,
+                  (double) MS_HPTIME2EPOCH(filelatest),
+                  (double) MS_HPTIME2EPOCH(fileearliest));
       
       if ( ! filewhere )
 	{

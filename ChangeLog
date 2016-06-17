@@ -1,3 +1,8 @@
+2016.169: 1.7
+	- Add extent time range for the queries that search for and delete rows
+	based on filename.  The time range criteria can be used by the database
+	for more efficient searching.
+
 2015.122: 1.6
 	- Update libmseed to 2.16.
 	- Database schema change: replace timerange field with starttime,endtime

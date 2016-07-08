@@ -6,12 +6,12 @@
 
 BIN = mseedindex
 
-SRCS = mseedindex.c md5.c
+SRCS = mseedindex.c md5.c ../sqlite/sqlite3.c
 OBJS = $(SRCS:.c=.o)
 
 # Required compiler parameters
-REQCFLAGS = -I../libmseed
-REQLDFLAGS = -L../libmseed
+REQCFLAGS = -I../libmseed -I../sqlite
+REQLDFLAGS = -L../libmseed -I../sqlite
 
 LDLIBS = -lmseed -lpq
 
@@ -25,7 +25,7 @@ clean:
 
 # Implicit rule for building object files
 %.o: %.c
-	$(CC) $(CFLAGS) $(REQCFLAGS) -c $<
+	$(CC) $(CFLAGS) $(REQCFLAGS) -c $< -o $@
 
 install:
 	@echo

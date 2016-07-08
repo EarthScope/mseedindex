@@ -67,11 +67,13 @@
 
 #include <libpq-fe.h>
 
+#include <sqlite3.h>
+
 #include <libmseed.h>
 
 #include "md5.h"
 
-#define VERSION "1.7"
+#define VERSION "1.8dev"
 #define PACKAGE "mseedindex"
 
 static int     retval       = 0;

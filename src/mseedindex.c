@@ -50,7 +50,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2016.169
+ * modified 2016.190
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -76,14 +76,12 @@
 #define VERSION "1.8dev"
 #define PACKAGE "mseedindex"
 
-static int     retval       = 0;
 static flag    verbose      = 0;
 static double  timetol      = -1.0; /* Time tolerance for continuous traces */
 static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous traces */
 static char    keeppath     = 0;    /* Use originally specified path, do not resolve absolute */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
-static PGconn *dbconn       = NULL; /* Database connection */
 static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
 static char   *dbhost       = "ppasdb-prod";
 static char   *dbport       = "5444";
@@ -91,6 +89,8 @@ static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
 static char   *dbpass       = "timeseries";
 static char   *dbtable      = "timeseries.tsindex"; /* With schema */
+
+static char   *sqlitedb     = 0
 
 struct timeindex {
   hptime_t time;
@@ -121,7 +121,8 @@ struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
 struct timeindex *AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
-static int SyncFileSeries (struct filelink *flp);
+static int SyncPostgres (void);
+static int SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp);
 static PGresult *PQuery (PGconn *pgdb, const char *format, ...);
 void Local_mst_printtracelist ( MSTraceGroup *mstg, flag timeformat );
 static int ProcessParam (int argcount, char **argvec);
@@ -135,7 +136,6 @@ static void Usage (void);
 int
 main (int argc, char **argv)
 {
-  PGresult *result = NULL;
   struct sectiondetails *sd = NULL;
   struct filelink *flp = NULL;
   MSRecord *msr = NULL;
@@ -175,16 +175,12 @@ main (int argc, char **argv)
       if ( (flp->mstg = mst_initgroup (flp->mstg)) == NULL )
         {
           ms_log (2, "Could not allocate MSTraceGroup, out of memory?\n");
-          if ( dbconn )
-            PQfinish (dbconn);
 	  exit (1);
         }
       
       if ( stat (flp->filename, &st) )
         {
           ms_log (2, "Could not stat %s: %s\n", flp->filename, strerror(errno));
-          if ( dbconn )
-            PQfinish (dbconn);
 	  exit (1);
         }
       
@@ -233,8 +229,6 @@ main (int argc, char **argv)
                 {
                   if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
                     {
-                      if ( dbconn )
-                        PQfinish (dbconn);
                       exit (1);
                     }
                   
@@ -248,8 +242,6 @@ main (int argc, char **argv)
                   if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
                     {
                       ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
-                      if ( dbconn )
-                        PQfinish (dbconn);
                       exit (1);
                     }
                 }
@@ -290,8 +282,7 @@ main (int argc, char **argv)
               /* Initialize time index with first entry and set next index for 1 hour later */
 	      if ( AddTimeIndex (&sd->tindex, msr->starttime, filepos) == NULL )
                 {
-                  if ( dbconn )
-                    PQfinish (dbconn);
+                  ms_log (2, "Could not add first time index entry with AddTimeIndex, out of memory?\n");
                   exit (1);
                 }
               
@@ -303,8 +294,6 @@ main (int argc, char **argv)
               if ( (sd->spans = mstl_init(NULL)) == NULL )
                 {
                   ms_log (2, "Could not allocate MSTraceList, out of memory?\n");
-                  if ( dbconn )
-                    PQfinish (dbconn);
                   exit (1);
                 }
               
@@ -314,8 +303,6 @@ main (int argc, char **argv)
                   if ( ! mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol) )
                     {
                       ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
-                      if ( dbconn )
-                        PQfinish (dbconn);
                       exit (1);
                     }
                 }
@@ -335,8 +322,6 @@ main (int argc, char **argv)
 	{
 	  ms_log (2, "Cannot read %s: %s\n", flp->filename, ms_errorstr(retcode));
 	  ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
-          if ( dbconn )
-            PQfinish (dbconn);
 	  exit (1);
 	}
       
@@ -353,99 +338,17 @@ main (int argc, char **argv)
       flp = flp->next;
     } /* End of looping over file list for reading */
   
-  /* Connect to database */
+  /* Synchronize details with database */
   if ( ! nosync )
     {
-      const char *keywords[7];
-      const char *values[7];
-      
-      keywords[0] = "host";
-      values[0] = dbhost;
-      keywords[1] = "port";
-      values[1] = dbport;
-      keywords[2] = "user";
-      values[2] = dbuser;
-      keywords[3] = "password";
-      values[3] = dbpass;
-      keywords[4] = "dbname";
-      values[4] = dbname;
-      keywords[5] = "fallback_application_name";
-      values[5] = PACKAGE;
-      keywords[6] = NULL;
-      values[6] = NULL;
-      
-      dbconn = PQconnectdbParams(keywords, values, 1);
-      
-      if ( ! dbconn )
-	{
-	  ms_log (2, "PQconnectdb returned NULL, connection failed");
+      if ( SyncPostgres() )
+        {
+          ms_log (2, "Error synchronizing with Postgres\n");
 	  exit (1);
-	}
-
-      if ( dbconntrace )
-	{
-          PQtrace (dbconn, stderr);
         }
-      
-      if ( PQstatus(dbconn) != CONNECTION_OK )
-	{
-	  ms_log (2, "Connection to database failed: %s", PQerrorMessage(dbconn));
-	  PQfinish (dbconn);
-	  exit (1);
-	}
-      
-      if ( verbose )
-	{
-	  int sver = PQserverVersion(dbconn);
-	  int major, minor, less;
-	  major = sver/10000;
-	  minor = sver/100 - major*100;
-	  less = sver - major*10000 - minor*100;
-	  
-	  ms_log (1, "Connected to database %s on host %s (server %d.%d.%d)\n",
-		  PQdb(dbconn), PQhost(dbconn),
-		  major, minor, less);
-	}
-      
-      /* Set session timezone to 'UTC' */
-      result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
-      if ( PQresultStatus(result) != PGRES_COMMAND_OK )
-	{
-	  ms_log (2, "SET timezone command failed: %s", PQerrorMessage(dbconn));
-	  PQclear (result);
-	  exit (1);
-	}
-      PQclear (result);
-      
-      if ( verbose )
-	ms_log (1, "Set database session timezone to UTC\n");
-    } /* End of ! nosync */
-
-  /* Synchronize indexing details with database */
-  flp = filelist;
-  while ( flp )
-    {
-      /* Sync time series listing */
-      if ( SyncFileSeries (flp) )
-	{
-	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
-          if ( dbconn )
-            PQfinish (dbconn);
-	  exit (1);
-	}
-      
-      flp = flp->next;
-    } /* End of looping over file list for synchronization */
-  
-  if ( dbconn )
-    {
-      if ( verbose >= 2 )
-	ms_log (1, "Closing database connection to %s\n", PQhost(dbconn));
-      
-      PQfinish (dbconn);
     }
   
-  return retval;
+  return 0;
 }  /* End of main() */
 
 
@@ -498,7 +401,112 @@ AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
 
 
 /***************************************************************************
- * SyncFileSeries():
+ * SyncPostgres():
+ *
+ * Synchronize with all file list entries with PostgresSQL.
+ *
+ * Returns 0 on success, and -1 on failure
+ ***************************************************************************/
+static int
+SyncPostgres (void)
+{
+  PGconn *dbconn       = NULL; /* Database connection */
+  PGresult *result     = NULL;
+  struct filelink *flp = NULL;
+  const char *keywords[7];
+  const char *values[7];
+    
+  /* Set up database connection parameters */
+  keywords[0] = "host";
+  values[0] = dbhost;
+  keywords[1] = "port";
+  values[1] = dbport;
+  keywords[2] = "user";
+  values[2] = dbuser;
+  keywords[3] = "password";
+  values[3] = dbpass;
+  keywords[4] = "dbname";
+  values[4] = dbname;
+  keywords[5] = "fallback_application_name";
+  values[5] = PACKAGE;
+  keywords[6] = NULL;
+  values[6] = NULL;
+  
+  dbconn = PQconnectdbParams(keywords, values, 1);
+      
+  if ( ! dbconn )
+    {
+      ms_log (2, "PQconnectdb returned NULL, connection failed");
+      exit (1);
+    }
+
+  if ( dbconntrace )
+    {
+      PQtrace (dbconn, stderr);
+    }
+  
+  if ( PQstatus(dbconn) != CONNECTION_OK )
+    {
+      ms_log (2, "Connection to database failed: %s", PQerrorMessage(dbconn));
+      PQfinish (dbconn);
+      exit (1);
+    }
+      
+  if ( verbose )
+    {
+      int sver = PQserverVersion(dbconn);
+      int major, minor, less;
+      major = sver/10000;
+      minor = sver/100 - major*100;
+      less = sver - major*10000 - minor*100;
+      
+      ms_log (1, "Connected to database %s on host %s (server %d.%d.%d)\n",
+              PQdb(dbconn), PQhost(dbconn),
+              major, minor, less);
+    }
+      
+  /* Set session timezone to 'UTC' */
+  result = PQexec (dbconn, "SET SESSION timezone TO 'UTC'");
+  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
+    {
+      ms_log (2, "SET timezone command failed: %s", PQerrorMessage(dbconn));
+      PQclear (result);
+      exit (1);
+    }
+  PQclear (result);
+  
+  if ( verbose )
+    ms_log (1, "Set database session timezone to UTC\n");
+
+  /* Synchronize indexing details with database */
+  flp = filelist;
+  while ( flp )
+    {
+      /* Sync time series listing */
+      if ( SyncPostgresFileSeries (dbconn, flp) )
+	{
+	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
+          if ( dbconn )
+            PQfinish (dbconn);
+	  return -1;
+	}
+      
+      flp = flp->next;
+    } /* End of looping over file list for synchronization */
+
+  
+  
+  if ( verbose >= 2 )
+    ms_log (1, "Closing database connection to %s\n", PQhost(dbconn));
+  
+  PQfinish (dbconn);
+  
+  return 0;
+}  /* End of SyncPostgres */
+
+
+/***************************************************************************
+ * SyncPostgresFileSeries():
  *
  * Synchronize the time series list associated with a file entry to
  * the database.
@@ -508,7 +516,7 @@ AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
  * Returns 0 on success, and -1 on failure
  ***************************************************************************/
 static int
-SyncFileSeries (struct filelink *flp)
+SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
 {
   PGresult *result = NULL;
   PGresult *matchresult = NULL;
@@ -858,7 +866,7 @@ SyncFileSeries (struct filelink *flp)
     }
   
   return 0;
-}  /* End of SyncFileSeries() */
+}  /* End of SyncPostgresFileSeries() */
 
 
 /***************************************************************************

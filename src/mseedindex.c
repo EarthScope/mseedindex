@@ -50,7 +50,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2016.190
+ * modified 2016.193
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -83,14 +83,16 @@ static char    keeppath     = 0;    /* Use originally specified path, do not res
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
 static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
-static char   *dbhost       = "ppasdb-prod";
-static char   *dbport       = "5444";
+
+static char   *dbtable      = 0;
+static char   *pghost       = 0;
+static char   *sqlitedb     = 0;
+
+static char   *dbport       = "5432";
 static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
 static char   *dbpass       = "timeseries";
-static char   *dbtable      = "timeseries.tsindex"; /* With schema */
 
-static char   *sqlitedb     = 0
 
 struct timeindex {
   hptime_t time;
@@ -341,7 +343,7 @@ main (int argc, char **argv)
   /* Synchronize details with database */
   if ( ! nosync )
     {
-      if ( SyncPostgres() )
+      if ( pghost && SyncPostgres() )
         {
           ms_log (2, "Error synchronizing with Postgres\n");
 	  exit (1);
@@ -415,10 +417,10 @@ SyncPostgres (void)
   struct filelink *flp = NULL;
   const char *keywords[7];
   const char *values[7];
-    
+  
   /* Set up database connection parameters */
   keywords[0] = "host";
-  values[0] = dbhost;
+  values[0] = pghost;
   keywords[1] = "port";
   values[1] = dbport;
   keywords[2] = "user";
@@ -1057,13 +1059,21 @@ ProcessParam (int argcount, char **argvec)
 	{
 	  dbtable = strdup (GetOptValue(argcount, argvec, optind++));
 	}
-      else if (strncmp (argvec[optind], "-dbhost", 7) == 0)
+      else if (strncmp (argvec[optind], "-pghost", 7) == 0)
 	{
-	  dbhost = strdup (GetOptValue(argcount, argvec, optind++));
+	  pghost = strdup (GetOptValue(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-sqlite", 7) == 0)
+	{
+	  sqlitedb = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbport", 7) == 0)
 	{
 	  dbport = strdup (GetOptValue(argcount, argvec, optind++));
+	}
+      else if (strncmp (argvec[optind], "-dbname", 7) == 0)
+	{
+	  dbname = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbuser", 7) == 0)
 	{
@@ -1125,6 +1135,15 @@ ProcessParam (int argcount, char **argvec)
   if ( filelist == 0 )
     {
       ms_log (2, "No input files were specified\n\n");
+      ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
+      ms_log (1, "Try %s -h for usage\n", PACKAGE);
+      exit (1);
+    }
+  
+  /* Make sure at least one database was specified unless not-synching */
+  if ( ! nosync && ! ( pghost || sqlitedb ) )
+    {
+      ms_log (2, "No database was specified\n\n");
       ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
       ms_log (1, "Try %s -h for usage\n", PACKAGE);
       exit (1);
@@ -1403,15 +1422,17 @@ Usage (void)
 	   " -V             Report program version\n"
 	   " -h             Show this usage message\n"
 	   " -v             Be more verbose, multiple flags can be used\n"
-	   " -ns            No sync, perform data parsing but do not connect to database\n"
+	   " -ns            No sync, perform data parsing but do not sync with database\n"
 	   "\n"
-           " -table  table  Use specified table name, currently: %s\n"
-	   " -dbhost  host  Specify database host, currently: %s\n"
+           " -table   table REQUIRED Specify table name, e.g. timeseries.tsindex\n"
+	   " -pghost  host  Specify Postgres database host, e.g. timeseriesdb\n"
+	   " -sqlite  file  Specify SQLite database file, e.g. timeseries.sqlite\n"
+           "\n"
 	   " -dbport  port  Specify database port, currently: %s\n"
+           " -dbname  name  Specify database name or full connection info, currently: %s\n"
 	   " -dbuser  user  Specify database user name, currently: %s\n"
 	   " -dbpass  pass  Specify database user password, currently: %s\n"
-	   " -dbname  name  Specify database name or full connection info, currently: %s\n"
-           " -TRACE         Enable libpq tracing facility and direct output to stderr\n"
+           " -TRACE         Enable libpq Postgres tracing facility and direct output to stderr\n"
 	   "\n"
 	   " -tt secs       Specify a time tolerance for continuous traces\n"
 	   " -rt diff       Specify a sample rate tolerance for continuous traces\n"
@@ -1419,5 +1440,5 @@ Usage (void)
 	   " -kp            Keep original paths, by default absolute paths are stored\n"
 	   "\n"
 	   " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
-	   "\n", dbtable, dbhost, dbport, dbuser, dbpass, dbname);
+	   "\n", dbport, dbname, dbuser, dbpass);
 }  /* End of Usage() */

@@ -82,16 +82,16 @@ static double  sampratetol  = -1.0; /* Sample rate tolerance for continuous trac
 static char    keeppath     = 0;    /* Use originally specified path, do not resolve absolute */
 static flag    nosync       = 0;    /* Control synchronization with database, 1 = no database */
 
-static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
-
-static char   *dbtable      = 0;
+static char   *table      = 0;
 static char   *pghost       = 0;
-static char   *sqlitedb     = 0;
+static char   *sqlite       = 0;
 
 static char   *dbport       = "5432";
 static char   *dbname       = "iris";
 static char   *dbuser       = "timeseries";
-static char   *dbpass       = "timeseries";
+static char   *dbpass       = 0;
+
+static flag    dbconntrace  = 0;    /* Trace database interactions, for debugging */
 
 
 struct timeindex {
@@ -194,7 +194,7 @@ main (int argc, char **argv)
       
       /* Read records from the input file */
       while ( (retcode = ms_readmsr (&msr, flp->filename, -1, &filepos,
-				     NULL, 1, 0, verbose-1)) == MS_NOERROR )
+				     NULL, 1, 0, verbose-2)) == MS_NOERROR )
 	{
 	  mst = NULL;
 	  endtime = msr_endtime(msr);
@@ -348,6 +348,8 @@ main (int argc, char **argv)
           ms_log (2, "Error synchronizing with Postgres\n");
 	  exit (1);
         }
+      
+      //CHAD, put in handling of SyncSQLite() here
     }
   
   return 0;
@@ -423,14 +425,17 @@ SyncPostgres (void)
   values[0] = pghost;
   keywords[1] = "port";
   values[1] = dbport;
-  keywords[2] = "user";
-  values[2] = dbuser;
-  keywords[3] = "password";
-  values[3] = dbpass;
-  keywords[4] = "dbname";
-  values[4] = dbname;
-  keywords[5] = "fallback_application_name";
-  values[5] = PACKAGE;
+  keywords[2] = "dbname";
+  values[2] = dbname;
+  keywords[3] = "fallback_application_name";
+  values[3] = PACKAGE;
+  keywords[4] = "user";
+  values[4] = dbuser;
+  if ( dbpass ) 
+    keywords[5] = "password";
+  else
+    keywords[5] = NULL;
+  values[5] = dbpass;
   keywords[6] = NULL;
   values[6] = NULL;
   
@@ -621,7 +626,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       matchresult = PQuery (dbconn,
 			    "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
 			    "FROM %s "
-			    "WHERE %s", dbtable, filewhere);
+			    "WHERE %s", table, filewhere);
       
       if ( PQresultStatus(matchresult) != PGRES_TUPLES_OK )
 	{
@@ -656,7 +661,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       /* Delete existing rows for filename or previous version of filename */
       if ( PQntuples(matchresult) > 0 )
 	{
-	  result = PQuery (dbconn, "DELETE FROM %s WHERE %s", dbtable, filewhere);
+	  result = PQuery (dbconn, "DELETE FROM %s WHERE %s", table, filewhere);
 	  if ( PQresultStatus(result) != PGRES_COMMAND_OK )
 	    {
 	      fprintf (stderr, "DELETE failed: %s", PQerrorMessage(dbconn));
@@ -809,7 +814,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
 			   "%.6g,'%s',%lld,%lld,'%s',"
                            "%s,%s,"
 			   "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
-			   dbtable,
+			   table,
 			   mst->network,
 			   mst->station,
 			   mst->location,
@@ -831,7 +836,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
 	  PQclear (result);
 	}
       
-      /* Print trace line when verbose >=2 or when verbose and nosync */
+      /* Print trace line when verbose >=2 or when verbose and not sync'ing */
       if ( verbose >= 2 || (verbose && nosync) )
 	{
 	  ms_log (0, "%s|%s|%s|%s|%c|%s|%s|%.10g|%s|%lld|%lld|%s|%lld|%lld\n",
@@ -1052,12 +1057,12 @@ ProcessParam (int argcount, char **argvec)
 	  verbose += strspn (&argvec[optind][1], "v");
 	}
       else if (strncmp (argvec[optind], "-ns", 3) == 0)
-	{
-	  nosync = 1;
-	}
+        {
+          nosync = 1;
+        }
       else if (strncmp (argvec[optind], "-table", 6) == 0)
 	{
-	  dbtable = strdup (GetOptValue(argcount, argvec, optind++));
+	  table = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-pghost", 7) == 0)
 	{
@@ -1065,7 +1070,7 @@ ProcessParam (int argcount, char **argvec)
 	}
       else if (strncmp (argvec[optind], "-sqlite", 7) == 0)
 	{
-	  sqlitedb = strdup (GetOptValue(argcount, argvec, optind++));
+	  sqlite = strdup (GetOptValue(argcount, argvec, optind++));
 	}
       else if (strncmp (argvec[optind], "-dbport", 7) == 0)
 	{
@@ -1140,15 +1145,24 @@ ProcessParam (int argcount, char **argvec)
       exit (1);
     }
   
-  /* Make sure at least one database was specified unless not-synching */
-  if ( ! nosync && ! ( pghost || sqlitedb ) )
+  /* Make sure table was specified if database was specified */
+  if ( ! nosync && ! ( pghost || sqlite ) )
     {
       ms_log (2, "No database was specified\n\n");
       ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
       ms_log (1, "Try %s -h for usage\n", PACKAGE);
       exit (1);
     }
-  
+
+  /* Make sure table was specified if database was specified */
+  if ( ( pghost || sqlite ) && ! table )
+    {
+      ms_log (2, "No database table name was specified\n\n");
+      ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
+      ms_log (1, "Try %s -h for usage\n", PACKAGE);
+      exit (1);
+    }
+
   /* Report the program version */
   if ( verbose )
     ms_log (1, "%s version: %s\n", PACKAGE, VERSION);
@@ -1422,23 +1436,24 @@ Usage (void)
 	   " -V             Report program version\n"
 	   " -h             Show this usage message\n"
 	   " -v             Be more verbose, multiple flags can be used\n"
-	   " -ns            No sync, perform data parsing but do not sync with database\n"
+           " -ns            No sync, perform data parsing but do not connect to database\n"
 	   "\n"
-           " -table   table REQUIRED Specify table name, e.g. timeseries.tsindex\n"
+	   "The -table argument is required along with either -pghost or -sqlite\n"
+           " -table   table Specify database table name, e.g. timeseries.tsindex\n"
 	   " -pghost  host  Specify Postgres database host, e.g. timeseriesdb\n"
 	   " -sqlite  file  Specify SQLite database file, e.g. timeseries.sqlite\n"
            "\n"
 	   " -dbport  port  Specify database port, currently: %s\n"
            " -dbname  name  Specify database name or full connection info, currently: %s\n"
 	   " -dbuser  user  Specify database user name, currently: %s\n"
-	   " -dbpass  pass  Specify database user password, currently: %s\n"
-           " -TRACE         Enable libpq Postgres tracing facility and direct output to stderr\n"
+	   " -dbpass  pass  Specify database user password\n"
+           " -TRACE         Enable Postgres libpq tracing facility and direct output to stderr\n"
 	   "\n"
 	   " -tt secs       Specify a time tolerance for continuous traces\n"
 	   " -rt diff       Specify a sample rate tolerance for continuous traces\n"
 	   "\n"
-	   " -kp            Keep original paths, by default absolute paths are stored\n"
+	   " -kp            Keep specified paths, by default absolute paths are stored\n"
 	   "\n"
 	   " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
-	   "\n", dbport, dbname, dbuser, dbpass);
+	   "\n", dbport, dbname, dbuser);
 }  /* End of Usage() */

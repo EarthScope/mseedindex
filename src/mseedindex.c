@@ -493,8 +493,7 @@ SyncPostgres (void)
       if ( SyncPostgresFileSeries (dbconn, flp) )
 	{
 	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
-          if ( dbconn )
-            PQfinish (dbconn);
+          PQfinish (dbconn);
 	  return -1;
 	}
       
@@ -911,6 +910,64 @@ PQuery (PGconn *pgdb, const char *format, ...)
   
   return result;
 }  /* End of PQuery() */
+
+
+/***************************************************************************
+ * SyncSQLite():
+ *
+ * Synchronize with all file list entries with SQLite.
+ *
+ * Returns 0 on success, and -1 on failure
+ ***************************************************************************/
+static int
+SyncSQLite (void)
+{
+  sqlite3 *dbconn  = NULL;
+  char *zErrMsg = 0;
+  struct filelink *flp = NULL;
+  int rc;
+
+  /* Open SQLite database, creating file if not existing */
+  rc = sqlite3_open (sqlite, &dbconn);
+  if ( rc )
+    {
+      ms_log (2, "Cannot open database: %s\n", sqlite3_errmsg(dbconn));
+      sqlite3_close (dbconn);
+      return -1;
+    }
+  
+  if ( verbose )
+    {
+      ms_log (1, "Opened SQLite database file %s\n", sqlite);
+    }
+
+  /* Create table if it does not exist */
+  CHAD
+  
+  
+  
+  /* Synchronize indexing details with database */
+  flp = filelist;
+  while ( flp )
+    {
+      /* Sync time series listing */
+      if ( SyncSQLiteFileSeries (dbconn, flp) )
+	{
+	  ms_log (2, "Error synchronizing time series for %s with database\n", flp->filename);
+          sqlite3_close (dbconn);
+	  return -1;
+	}
+      
+      flp = flp->next;
+    } /* End of looping over file list for synchronization */
+
+  if ( verbose >= 2 )
+    ms_log (1, "Closing database %s\n", sqlite);
+  
+  sqlite3_close (dbconn);
+  
+  return 0;
+}  /* End of SyncSQLite */
 
 
 /***************************************************************************

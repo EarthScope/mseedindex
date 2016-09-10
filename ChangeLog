@@ -1,3 +1,8 @@
+2016.253: 1.8
+	- Require -table argument and one of either -pghost or -sqlite.
+	- Add capabilty to synchronize with SQLite3 databases.
+	- Refactor internals for reduced mixing of database interactions.
+
 2016.169: 1.7
 	- Add extent time range for the queries that search for and delete rows
 	based on filename.  The time range criteria can be used by the database

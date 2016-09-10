@@ -7,7 +7,7 @@
  * ORFEUS/EC-Project MEREDIAN
  * IRIS Data Management Center
  *
- * modified: 2015.108
+ * modified: 2015.108 - modified 2016.252 in mseedindex sources
  ***************************************************************************/
 
 #include <stdio.h>
@@ -1174,7 +1174,7 @@ ms_readleapsecondfile (char *filename)
   
   if ( ! (fp = fopen(filename, "rb")) )
     {
-      ms_log (2, "Cannot open file %s: %s\n", filename, strerror(errno));
+      ms_log (2, "Cannot open leap second file %s: %s\n", filename, strerror(errno));
       return -1;
     }
   
@@ -1251,6 +1251,13 @@ ms_readleapsecondfile (char *filename)
           ms_log (1, "Unrecognized leap second file line: '%s'\n", readline);
         }
     }
+
+  if ( ferror(fp) )
+    {
+      ms_log (2, "Error reading leap second file (%s): %s\n", filename, strerror(errno));
+    }
+
+  fclose (fp);
   
   return count;
 }  /* End of ms_readleapsecondfile() */

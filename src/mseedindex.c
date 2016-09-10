@@ -77,7 +77,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2016.253
+ * modified 2016.254
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -586,6 +586,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   char *timeindexstr = NULL;
   char *timespansstr = NULL;
 
+  int rv;
   int idx;
   char *vp;
   char *ep = NULL;
@@ -651,17 +652,17 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
      * Include criteria to match an overlapping time range of extents, which can be used by the database. */
     if (baselength > 0)
-      asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
-                baselength, flp->filename,
-                (double)MS_HPTIME2EPOCH (filelatest),
-                (double)MS_HPTIME2EPOCH (fileearliest));
+      rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                     baselength, flp->filename,
+                     (double)MS_HPTIME2EPOCH (filelatest),
+                     (double)MS_HPTIME2EPOCH (fileearliest));
     else
-      asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
-                flp->filename,
-                (double)MS_HPTIME2EPOCH (filelatest),
-                (double)MS_HPTIME2EPOCH (fileearliest));
+      rv = asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                     flp->filename,
+                     (double)MS_HPTIME2EPOCH (filelatest),
+                     (double)MS_HPTIME2EPOCH (fileearliest));
 
-    if (!filewhere)
+    if (rv <= 0 || !filewhere)
     {
       ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
       return -1;
@@ -802,7 +803,14 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       /* Add single quotes to make a string for the database */
       if (indexstr)
       {
-        asprintf (&timeindexstr, "'%s'", indexstr);
+        rv = asprintf (&timeindexstr, "'%s'", indexstr);
+
+        if (rv <= 0 || !timeindexstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time index string\n", flp->filename);
+          return -1;
+        }
+
         free (indexstr);
       }
     }
@@ -846,7 +854,14 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       /* Add Array declaration for the database */
       if (spansstr)
       {
-        asprintf (&timespansstr, "ARRAY[%s]", spansstr);
+        rv = asprintf (&timespansstr, "ARRAY[%s]", spansstr);
+
+        if (rv <= 0 || !timespansstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time spans string\n", flp->filename);
+          return -1;
+        }
+
         free (spansstr);
       }
     }
@@ -1196,13 +1211,13 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
     /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
      * Include criteria to match an overlapping time range of extents, which can be used by the database. */
     if (baselength > 0)
-      asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= '%s' AND endtime >= '%s'",
-                baselength, flp->filename, latest, earliest);
+      rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= '%s' AND endtime >= '%s'",
+                     baselength, flp->filename, latest, earliest);
     else
-      asprintf (&filewhere, "filename='%s' AND starttime <= '%s' AND endtime >= '%s'",
-                flp->filename, latest, earliest);
+      rv = asprintf (&filewhere, "filename='%s' AND starttime <= '%s' AND endtime >= '%s'",
+                     flp->filename, latest, earliest);
 
-    if (!filewhere)
+    if (rv <= 0 || !filewhere)
     {
       ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
       return -1;
@@ -1355,7 +1370,14 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       /* Add single quotes to make a string for the database */
       if (indexstr)
       {
-        asprintf (&timeindexstr, "'%s'", indexstr);
+        rv = asprintf (&timeindexstr, "'%s'", indexstr);
+
+        if (rv <= 0 || !timeindexstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time index string\n", flp->filename);
+          return -1;
+        }
+
         free (indexstr);
       }
     }
@@ -1399,7 +1421,14 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       /* Add single quotes to make a string for the database */
       if (spansstr)
       {
-        asprintf (&timespansstr, "'%s'", spansstr);
+        rv = asprintf (&timespansstr, "'%s'", spansstr);
+
+        if (rv <= 0 || !timespansstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time spans string\n", flp->filename);
+          return -1;
+        }
+
         free (spansstr);
       }
     }

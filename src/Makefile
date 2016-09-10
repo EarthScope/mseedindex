@@ -15,6 +15,9 @@ REQLDFLAGS = -L../libmseed -I../sqlite
 
 LDLIBS = -lmseed -lpq
 
+# Specific defines for sqlite3
+%sqlite3.o: TARGETCFLAGS = -DSQLITE_THREADSAFE=0 -DSQLITE_OMIT_LOAD_EXTENSION
+
 all: $(BIN)
 
 $(BIN): $(OBJS)
@@ -25,7 +28,7 @@ clean:
 
 # Implicit rule for building object files
 %.o: %.c
-	$(CC) $(CFLAGS) $(REQCFLAGS) -c $< -o $@
+	$(CC) $(CFLAGS) $(REQCFLAGS) $(TARGETCFLAGS) -c $< -o $@
 
 install:
 	@echo

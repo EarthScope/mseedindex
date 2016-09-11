@@ -77,10 +77,9 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2016.254
+ * modified 2016.255
  ***************************************************************************/
 
-#define _GNU_SOURCE
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
@@ -92,7 +91,9 @@
 #include <sys/stat.h>
 #include <time.h>
 
+#ifndef WITHOUTPOSTGRESQL
 #include <libpq-fe.h>
+#endif
 
 #include <sqlite3.h>
 
@@ -100,7 +101,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.8dev"
+#define VERSION "1.8"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -154,9 +155,11 @@ struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
 struct timeindex *AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
+#ifndef WITHOUTPOSTGRESQL
 static int SyncPostgres (void);
 static int SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp);
 static PGresult *PQuery (PGconn *pgdb, const char *format, ...);
+#endif
 static int SyncSQLite (void);
 static int SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp);
 static int SQLiteExec (sqlite3 *dbconn, int (*callback) (void *, int, char **, char **),
@@ -390,11 +393,13 @@ main (int argc, char **argv)
   /* Synchronize details with database */
   if (!nosync)
   {
+#ifndef WITHOUTPOSTGRESQL
     if (pghost && SyncPostgres ())
     {
       ms_log (2, "Error synchronizing with Postgres\n");
       exit (1);
     }
+#endif
 
     if (sqlitefile && SyncSQLite ())
     {
@@ -453,6 +458,7 @@ AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
   return nindex;
 } /* End of AddTimeIndex */
 
+#ifndef WITHOUTPOSTGRESQL
 /***************************************************************************
  * SyncPostgres():
  *
@@ -969,6 +975,7 @@ PQuery (PGconn *pgdb, const char *format, ...)
 
   return result;
 } /* End of PQuery() */
+#endif
 
 /***************************************************************************
  * SyncSQLite():
@@ -1747,7 +1754,11 @@ ProcessParam (int argcount, char **argvec)
     }
     else if (strncmp (argvec[optind], "-pghost", 7) == 0)
     {
+#ifndef WITHOUTPOSTGRESQL
       pghost = strdup (GetOptValue (argcount, argvec, optind++));
+#else
+      ms_log(2, "%s was not compiled with Postgres support\n", PACKAGE);
+#endif
     }
     else if (strncmp (argvec[optind], "-sqlite", 7) == 0)
     {
@@ -2116,7 +2127,9 @@ Usage (void)
            "\n"
            "The -table argument is required along with either -pghost or -sqlite\n"
            " -table   table Specify database table name, e.g. timeseries.tsindex\n"
+#ifndef WITHOUTPOSTGRESQL
            " -pghost  host  Specify Postgres database host, e.g. timeseriesdb\n"
+#endif
            " -sqlite  file  Specify SQLite database file, e.g. timeseries.sqlite\n"
            "\n"
            " -dbport  port  Specify database port, currently: %s\n"

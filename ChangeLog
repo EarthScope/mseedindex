@@ -1,5 +1,6 @@
 2016.314: 1.9:
 	- Update libmseed to 2.18.
+	- Update sqlite to 3.15.1.
 
 2016.255: 1.8
 	- Require -table argument and one of either -pghost or -sqlite.

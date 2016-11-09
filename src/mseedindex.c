@@ -102,7 +102,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.8"
+#define VERSION "1.9"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;

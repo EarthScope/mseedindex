@@ -1,3 +1,6 @@
+2016.314: 1.9:
+	- Update libmseed to 2.18.
+
 2016.255: 1.8
 	- Require -table argument and one of either -pghost or -sqlite.
 	- Add capabilty to synchronize with SQLite3 databases.

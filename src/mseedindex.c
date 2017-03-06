@@ -836,9 +836,10 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       char *ratesstr = NULL;
       int ratemismatches = 0;
 
-      if (sd->spans->numtraces != 1)
+      if (sd->spans->traces && sd->spans->numtraces != 1)
       {
-        ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+        ms_log (2, "Span list contains more than 1 trace ID for %s.%s.%s.%s, something is seriously wrong!\n",
+                mst->network, mst->station, mst->location, mst->channel);
         return -1;
       }
 
@@ -1461,9 +1462,10 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       char *ratesstr = NULL;
       int ratemismatches = 0;
 
-      if (sd->spans->numtraces != 1)
+      if (sd->spans->traces && sd->spans->numtraces != 1)
       {
-        ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+        ms_log (2, "Span list contains more than 1 trace ID for %s.%s.%s.%s, something is seriously wrong!\n",
+                mst->network, mst->station, mst->location, mst->channel);
         return -1;
       }
 
@@ -1803,7 +1805,7 @@ Local_mst_printtracelist (MSTraceGroup *mstg, flag timeformat)
       MSTraceID *id = 0;
       MSTraceSeg *seg = 0;
 
-      if (sd->spans->numtraces != 1)
+      if (sd->spans->traces && sd->spans->numtraces != 1)
         ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
 
       id = sd->spans->traces;

@@ -15,11 +15,12 @@ in the 'doc' directory.
 In most environments a simple 'make' will build the program.  The build
 system is designed for GNU make, which make be avilable as 'gmake'.
 
-The CC and CFLAGS environment variables can be used to configure
+The CC, CFLAGS and LDFLAGS environment variables can be used to configure
 the build parameters.
 
 For example, if Postgres is installed in non-system locations:
-CFLAGS='-I/Library/PostgreSQL/9.5/include -L/Library/PostgreSQL/9.5/lib/'
+* CFLAGS='-I/Library/PostgreSQL/9.5/include'
+* LDFLAGS='-L/Library/PostgreSQL/9.5/lib/'
 
 To build without PostgreSQL support set the variable WITHOUTPOSTGRESQL.
 This can be done in a single command with make like:

@@ -43,8 +43,10 @@
  * byteoffset   numeric(15,0)
  * bytes        numeric(15,0)
  * hash         character varying(64)
- * timeindex    hstore       -- List of time=>offset pairs using epoch times
- * timespans    numrange[]   -- Array of numrange values containing epoch times
+ * timeindex    hstore          -- List of time=>offset pairs using epoch times
+ * timespans    numrange[]      -- Array of numrange values containing epoch times
+ * timerates    numeric(10,6)[] -- Array of sample rates corresponding to timespans
+ * format       character varying(8)  -- NULL means miniSEED
  * filemodtime  timestamp with time zone
  * updated      timestamp with time zone
  * scanned      timestamp with time zone
@@ -67,6 +69,8 @@
  * hash         TEXT
  * timeindex    TEXT   -- List of time=>offset pairs using epoch times
  * timespans    TEXT   -- List of intervals using epoch time values
+ * timerates    TEXT   -- List of sample rates corresponding to timespans
+ * format       TEXT   -- NULL means miniSEED
  * filemodtime  TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS
  * updated      TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS
  * scanned      TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS
@@ -77,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2016.255
+ * modified 2017.064
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -102,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "1.9"
+#define VERSION "2.0"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -592,6 +596,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   char tmpstring[100];
   char *timeindexstr = NULL;
   char *timespansstr = NULL;
+  char *timeratesstr = NULL;
 
   int rv;
   int idx;
@@ -822,27 +827,30 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       }
     }
 
-    /* Create the time spans array:
-     * 'numrange(start1,end1,'[]'),numrange(start2,end2,'[]'),numrange(start3,end3,'[]')...' */
+    /* Create the time spans and rates arrays for spans */
     if (sd->spans)
     {
       MSTraceID *id;
       MSTraceSeg *seg;
       char *spansstr = NULL;
+      char *ratesstr = NULL;
+      int ratemismatches = 0;
+
+      if (sd->spans->numtraces != 1)
+      {
+        ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+        return -1;
+      }
 
       id = sd->spans->traces;
       while (id)
       {
-        if (sd->spans->numtraces != 1)
-        {
-          ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
-          return -1;
-        }
-
+        /* Create the time spans array:
+           'numrange(start1,end1,'[]'),numrange(start2,end2,'[]'),numrange(start3,end3,'[]'),...' */
         seg = id->first;
         while (seg)
         {
-          /* Create number range value, rounding epoch times to microseconds */
+          /* Create number range value entry in array, rounding epoch times to microseconds */
           snprintf (tmpstring, sizeof (tmpstring), "numrange(%.6f,%.6f,'[]')",
                     (double)MS_HPTIME2EPOCH (seg->starttime),
                     (double)MS_HPTIME2EPOCH (seg->endtime));
@@ -853,12 +861,38 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
             return -1;
           }
 
+          /* Track if segment rate is in tolerance with trace/row rate */
+          if (!MS_ISRATETOLERABLE (seg->samprate, mst->samprate))
+          {
+            ratemismatches += 1;
+          }
+
           seg = seg->next;
         }
+
+        /* Create the time rates array if there are rate mismatches:
+           'rate1,rate2,rate3,...' */
+        if (ratemismatches > 0)
+        {
+          seg = id->first;
+          while (seg)
+          {
+            snprintf (tmpstring, sizeof (tmpstring), "%.6g", seg->samprate);
+
+            if (AddToString (&ratesstr, tmpstring, ",", 0, 8388608))
+            {
+              ms_log (2, "Time rate list has grown too large: %s\n", ratesstr);
+              return -1;
+            }
+
+            seg = seg->next;
+          }
+        }
+
         id = id->next;
       }
 
-      /* Add Array declaration for the database */
+      /* Add Array declaration to timespans for the database */
       if (spansstr)
       {
         rv = asprintf (&timespansstr, "ARRAY[%s]", spansstr);
@@ -871,18 +905,35 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
 
         free (spansstr);
       }
-    }
+
+      /* Add Array declaration to timerates for the database */
+      if (ratesstr)
+      {
+        rv = asprintf (&timeratesstr, "ARRAY[%s]", ratesstr);
+
+        if (rv <= 0 || !timeratesstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time rates string\n", flp->filename);
+          return -1;
+        }
+
+        free (ratesstr);
+      }
+    } /* End if (sd->spans) */
 
     if (dbconn)
     {
       /* Insert new row */
       result = PQuery (dbconn,
                        "INSERT INTO %s "
-                       "(network,station,location,channel,quality,starttime,endtime,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
+                       "(network,station,location,channel,quality,starttime,endtime,samplerate,"
+                       "filename,byteoffset,bytes,hash,"
+                       "timeindex,timespans,timerates,format,"
+                       "filemodtime,updated,scanned) "
                        "VALUES "
-                       "('%s','%s','%s','%s','%c',to_timestamp(%s),to_timestamp(%s),"
-                       "%.6g,'%s',%lld,%lld,'%s',"
-                       "%s,%s,"
+                       "('%s','%s','%s','%s','%c',to_timestamp(%s),to_timestamp(%s),%.6g,"
+                       "'%s',%lld,%lld,'%s',"
+                       "%s,%s,%s,%s,"
                        "to_timestamp(%lld),to_timestamp(%lld),to_timestamp(%lld))",
                        table,
                        mst->network,
@@ -894,6 +945,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
                        mst->samprate, flp->filename, sd->startoffset, bytecount, sd->digeststr,
                        (timeindexstr) ? timeindexstr : "NULL",
                        (timespansstr) ? timespansstr : "NULL",
+                       (timeratesstr) ? timeratesstr : "NULL",
+                       "NULL",
                        (long long int)flp->filemodtime, (long long int)sd->updated, (long long int)flp->scantime);
 
       if (PQresultStatus (result) != PGRES_COMMAND_OK)
@@ -913,8 +966,9 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
               earliest, latest, mst->samprate, flp->filename,
               sd->startoffset, bytecount, sd->digeststr,
               (long long int)sd->updated, (long long int)flp->scantime);
-      printf (" TINDEX: '%s'\n", timeindexstr);
-      printf (" TSPANS: '%s'\n", timespansstr);
+      printf (" TINDEX: '%s'\n", (timeindexstr)?timeindexstr:"");
+      printf (" TSPANS: '%s'\n", (timespansstr)?timespansstr:"");
+      printf (" TRATES: '%s'\n", (timeratesstr)?timeratesstr:"");
     }
 
     if (timeindexstr)
@@ -926,6 +980,11 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     {
       free (timespansstr);
       timespansstr = NULL;
+    }
+    if (timeratesstr)
+    {
+      free (timeratesstr);
+      timeratesstr = NULL;
     }
 
     mst = mst->next;
@@ -1023,6 +1082,8 @@ SyncSQLite (void)
                    "hash TEXT,"
                    "timeindex TEXT,"
                    "timespans TEXT,"
+                   "timerates TEXT,"
+                   "format TEXT,"
                    "filemodtime TEXT,"
                    "updated TEXT,"
                    "scanned TEXT)",
@@ -1144,6 +1205,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   char tmpstring[100];
   char *timeindexstr = NULL;
   char *timespansstr = NULL;
+  char *timeratesstr = NULL;
 
   int rv;
   int idx;
@@ -1390,23 +1452,26 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       }
     }
 
-    /* Create the time spans array:
-     * '(start1,end1),(start2,end2),(start3,end3)...' */
+    /* Create the time spans and rates arrays for spans */
     if (sd->spans)
     {
       MSTraceID *id;
       MSTraceSeg *seg;
       char *spansstr = NULL;
+      char *ratesstr = NULL;
+      int ratemismatches = 0;
+
+      if (sd->spans->numtraces != 1)
+      {
+        ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+        return -1;
+      }
 
       id = sd->spans->traces;
       while (id)
       {
-        if (sd->spans->numtraces != 1)
-        {
-          ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
-          return -1;
-        }
-
+        /* Create the time spans array:
+         * '[start1,end1],[start2,end2],[start3,end3],...' */
         seg = id->first;
         while (seg)
         {
@@ -1421,12 +1486,38 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
             return -1;
           }
 
+          /* Track if segment rate is in tolerance with trace/row rate */
+          if (!MS_ISRATETOLERABLE (seg->samprate, mst->samprate))
+          {
+            ratemismatches += 1;
+          }
+
           seg = seg->next;
         }
+
+        /* Create the time rates array if there are rate mismatches:
+           'rate1,rate2,rate3,...' */
+        if (ratemismatches > 0)
+        {
+          seg = id->first;
+          while (seg)
+          {
+            snprintf (tmpstring, sizeof (tmpstring), "%.6g", seg->samprate);
+
+            if (AddToString (&ratesstr, tmpstring, ",", 0, 8388608))
+            {
+              ms_log (2, "Time rate list has grown too large: %s\n", ratesstr);
+              return -1;
+            }
+
+            seg = seg->next;
+          }
+        }
+
         id = id->next;
       }
 
-      /* Add single quotes to make a string for the database */
+      /* Add single quotes to timespans to make a string for the database */
       if (spansstr)
       {
         rv = asprintf (&timespansstr, "'%s'", spansstr);
@@ -1439,7 +1530,21 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
 
         free (spansstr);
       }
-    }
+
+      /* Add single quotes to timerates to make a string for the database */
+      if (ratesstr)
+      {
+        rv = asprintf (&timeratesstr, "'%s'", ratesstr);
+
+        if (rv <= 0 || !timeratesstr)
+        {
+          ms_log (2, "Cannot allocate memory for final time rates string\n", flp->filename);
+          return -1;
+        }
+
+        free (ratesstr);
+      }
+    } /* End if (sd->spans) */
 
     if (dbconn)
     {
@@ -1459,11 +1564,14 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       /* Insert new row */
       rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
                        "INSERT INTO %s "
-                       "(network,station,location,channel,quality,starttime,endtime,samplerate,filename,byteoffset,bytes,hash,timeindex,timespans,filemodtime,updated,scanned) "
+                       "(network,station,location,channel,quality,starttime,endtime,samplerate,"
+                       "filename,byteoffset,bytes,hash,"
+                       "timeindex,timespans,timerates,format,"
+                       "filemodtime,updated,scanned) "
                        "VALUES "
-                       "('%s','%s','%s','%s','%c','%s','%s',"
-                       "%.6g,'%s',%lld,%lld,'%s',"
-                       "%s,%s,"
+                       "('%s','%s','%s','%s','%c','%s','%s',%.6g,"
+                       "'%s',%lld,%lld,'%s',"
+                       "%s,%s,%s,%s,"
                        "'%s','%s','%s')",
                        table,
                        mst->network,
@@ -1475,6 +1583,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
                        mst->samprate, flp->filename, sd->startoffset, bytecount, sd->digeststr,
                        (timeindexstr) ? timeindexstr : "NULL",
                        (timespansstr) ? timespansstr : "NULL",
+                       (timeratesstr) ? timeratesstr : "NULL",
+                       "NULL",
                        filemodtimestr, updatedstr, scannedstr);
       if (rv != SQLITE_OK)
       {
@@ -1493,8 +1603,9 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
               mst->samprate, flp->filename,
               sd->startoffset, bytecount, sd->digeststr,
               (long long int)sd->updated, (long long int)flp->scantime);
-      printf (" TINDEX: '%s'\n", timeindexstr);
-      printf (" TSPANS: '%s'\n", timespansstr);
+      printf (" TINDEX: '%s'\n", (timeindexstr)?timeindexstr:"");
+      printf (" TSPANS: '%s'\n", (timespansstr)?timespansstr:"");
+      printf (" TRATES: '%s'\n", (timeratesstr)?timeratesstr:"");
     }
 
     if (timeindexstr)
@@ -1506,6 +1617,11 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
     {
       free (timespansstr);
       timespansstr = NULL;
+    }
+    if (timeratesstr)
+    {
+      free (timeratesstr);
+      timeratesstr = NULL;
     }
 
     mst = mst->next;

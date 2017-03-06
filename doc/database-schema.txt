@@ -1,5 +1,7 @@
+-- Time series index schema
+-- Version 1.0
 
-CREATE TABLE timeseries.tsindex
+CREATE TABLE tsindex
 (
   id serial,
   network character varying(2) NOT NULL,
@@ -7,7 +9,8 @@ CREATE TABLE timeseries.tsindex
   location character varying(2) NOT NULL,
   channel character varying(3) NOT NULL,
   quality character varying(1) NOT NULL,
-  timerange tstzrange,
+  starttime timestamp with time zone NOT NULL,
+  endtime timestamp with time zone NOT NULL,
   samplerate numeric(10,6) NOT NULL,
   filename character varying(256) NOT NULL,
   byteoffset numeric(15,0) NOT NULL,
@@ -15,32 +18,37 @@ CREATE TABLE timeseries.tsindex
   hash character varying(64),
   timeindex hstore,
   timespans numrange[],
+  timerates numeric(10,6)[],
+  format character varying(8),
   filemodtime timestamp with time zone NOT NULL,
   updated timestamp with time zone NOT NULL,
   scanned timestamp with time zone NOT NULL
-)
-WITH (
-  OIDS=FALSE
 );
-ALTER TABLE timeseries.tsindex
-  OWNER TO timeseries;
+
+-- Suggested indexes
 
 CREATE INDEX tsindex_filename_idx
-  ON timeseries.tsindex
+  ON tsindex
   USING btree
   (filename);
 
 CREATE INDEX tsindex_nslcq_idx
-  ON timeseries.tsindex
+  ON tsindex
   USING btree
   (network, station, location, channel, quality);
 
-CREATE INDEX tsindex_timerange_idx
-  ON timeseries.tsindex
-  USING gist
-  (timerange);
+CREATE INDEX tsindex_starttime_idx
+  ON tsindex
+  USING btree
+  (starttime);
+
+CREATE INDEX tsindex_endtime_idx
+  ON tsindex
+  USING btree
+  (endtime);
 
 CREATE INDEX tsindex_updated_idx
-  ON timeseries.tsindex
+  ON tsindex
   USING btree
   (updated);
+

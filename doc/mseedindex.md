@@ -18,11 +18,11 @@ mseedindex [options] file1 [file2 file3 ...]
 
 ## <a id='description'>Description</a>
 
-<p ><b>mseedindex</b> reads Mini-SEED, determines contigous data sections of time series (same network, station, location, channel and quality) and synchronizes information about each data section with a database.</p>
+<p ><b>mseedindex</b> reads Mini-SEED, determines contiguous data sections of time series (same network, station, location, channel and quality) and synchronizes information about each data section with a database.</p>
 
 <p >The location of a given section is represented in the database as starting at a byte offset in a file and a count of bytes that follow. Each section of data is a row in the schema.</p>
 
-<p >Data files should be scanned or synchornized when they are in-place. By default the absolute path to each input file will be resolved and stored.</p>
+<p >Data files should be scanned or synchronized when they are in-place. By default the absolute path to each input file will be resolved and stored.</p>
 
 <p >Any existing rows in the database that match the file being synchronized will be replaced during synchronization.  This operation is done as a database transaction containing all deletions and all insertions.  See <b>FILE VERSIONING</b> for a description of how to avoid race conditions while simultaneously updating data files and extracting data.</p>
 
@@ -100,15 +100,15 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <b>-tt </b><i>secs</i>
 
-<p style="padding-left: 30px;">Specify a time tolerance for constructing continous trace segments. The tolerance is specified in seconds.  The default tolerance is 1/2 of the sample period.</p>
+<p style="padding-left: 30px;">Specify a time tolerance for constructing continuous trace segments. The tolerance is specified in seconds.  The default tolerance is 1/2 of the sample period.</p>
 
 <b>-rt </b><i>diff</i>
 
-<p style="padding-left: 30px;">Specify a sample rate tolerance for constructing continous trace segments. The tolerance is specified as the difference between two sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) < 0.0001).</p>
+<p style="padding-left: 30px;">Specify a sample rate tolerance for constructing continuous trace segments. The tolerance is specified as the difference between two sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) < 0.0001).</p>
 
 <b>-kp</b>
 
-<p style="padding-left: 30px;">Keep the original file paths as specified.  By default the absolute, canonical path to each file is determiend and stored in the database.</p>
+<p style="padding-left: 30px;">Keep the original file paths as specified.  By default the absolute, canonical path to each file is determined and stored in the database.</p>
 
 ## <a id='input-list-file'>Input List File</a>
 
@@ -144,4 +144,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2016/09/09)
+(man page 2017/03/06)

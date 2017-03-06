@@ -120,7 +120,7 @@ static char *pghost = 0;
 static char *sqlitefile = 0;
 
 static char *dbport = "5432";
-static char *dbname = "iris";
+static char *dbname = "timeseries";
 static char *dbuser = "timeseries";
 static char *dbpass = 0;
 

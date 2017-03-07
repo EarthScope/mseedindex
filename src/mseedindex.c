@@ -1473,7 +1473,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       while (id)
       {
         /* Create the time spans array:
-         * '[start1,end1],[start2,end2],[start3,end3],...' */
+         * '[start1:end1],[start2:end2],[start3:end3],...' */
         seg = id->first;
         while (seg)
         {

@@ -1,4 +1,10 @@
-2017.062: 2.0:
+2017.066: 2.1
+	- Set SQLite busy timeout to 10 seconds to allow for graceful
+	multi-process access to the database (e.g. parallel usage).
+	- Set HAVE_USLEEP=1 for SQLite build to allow timeout loops to
+	iterate with sub-second intervals.
+
+2017.062: 2.0
 	- Update libmseed to 2.19.2.
 	- Update sqlite to 3.17.
 	- Update to table definition with timerates and format fields, hereby
@@ -6,7 +12,7 @@
 	- Update doc/database-schema.txt to version 1.0 and generalize.
 	- Change default database name from iris to timeseries.
 
-2016.314: 1.9:
+2016.314: 1.9
 	- Update libmseed to 2.18.
 	- Update sqlite to 3.15.
 	- Change license to LGPLv3 and add LICENSE.txt.

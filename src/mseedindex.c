@@ -81,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.064
+ * modified 2017.066
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.0"
+#define VERSION "2.1"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1057,6 +1057,14 @@ SyncSQLite (void)
   if (sqlite3_open (sqlitefile, &dbconn))
   {
     ms_log (2, "Cannot open SQLite database: %s\n", sqlite3_errmsg (dbconn));
+    sqlite3_close (dbconn);
+    return -1;
+  }
+
+  /* Set timeout in milliseconds to wait for access to the database */
+  if (sqlite3_busy_timeout(dbconn, 10000))
+  {
+    ms_log (2, "Cannot set busy timeout on SQLite database: %s\n", sqlite3_errmsg (dbconn));
     sqlite3_close (dbconn);
     return -1;
   }

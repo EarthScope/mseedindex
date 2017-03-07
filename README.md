@@ -15,6 +15,11 @@ overview and documentation of the database schema.
 For program usage see the [mseedindex manual](doc/mseedindex.md)
 in the 'doc' directory.
 
+## Download release versions
+
+The [releases](https://github.com/iris-edu/mseedindex/releases) area
+contains release versions.
+
 ## Building and Installing
 
 In most environments a simple 'make' will build the program.  The build

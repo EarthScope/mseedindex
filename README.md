@@ -7,7 +7,12 @@ and additional details.  The database can be either
 [PostgreSQL](https://www.postgres.org) or 
 [SQLite](https://www.sqlite.org/).
 
-For usage information see the [mseedindex manual](doc/mseedindex.md)
+## Documentation
+
+The [Wiki](https://github.com/iris-edu/mseedindex/wiki) provides an
+overview and documentation of the database schema.
+
+For program usage see the [mseedindex manual](doc/mseedindex.md)
 in the 'doc' directory.
 
 ## Building and Installing

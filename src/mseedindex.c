@@ -81,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.066
+ * modified 2017.068
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.1"
+#define VERSION "2.2dev"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -118,6 +118,7 @@ static flag nosync = 0;           /* Control synchronization with database, 1 = 
 static char *table = 0;
 static char *pghost = 0;
 static char *sqlitefile = 0;
+static unsigned long int sqlitebusyto = 10000;
 
 static char *dbport = "5432";
 static char *dbname = "timeseries";
@@ -1061,17 +1062,25 @@ SyncSQLite (void)
     return -1;
   }
 
-  /* Set timeout in milliseconds to wait for access to the database */
-  if (sqlite3_busy_timeout(dbconn, 10000))
-  {
-    ms_log (2, "Cannot set busy timeout on SQLite database: %s\n", sqlite3_errmsg (dbconn));
-    sqlite3_close (dbconn);
-    return -1;
-  }
-
   if (verbose)
   {
     ms_log (1, "Opened SQLite database file %s\n", sqlitefile);
+  }
+
+  /* Set timeout in milliseconds to wait for access to the database */
+  if (sqlitebusyto)
+  {
+    if (sqlite3_busy_timeout(dbconn, sqlitebusyto))
+    {
+      ms_log (2, "Cannot set busy timeout on SQLite database: %s\n", sqlite3_errmsg (dbconn));
+      sqlite3_close (dbconn);
+      return -1;
+    }
+
+    if (verbose >= 2)
+    {
+      ms_log (1, "SQLite database busy timeout set to %lu\n", sqlitebusyto);
+    }
   }
 
   /* Create table if it does not exist */
@@ -1875,6 +1884,18 @@ ProcessParam (int argcount, char **argvec)
     {
       nosync = 1;
     }
+    else if (strncmp (argvec[optind], "-kp", 3) == 0)
+    {
+      keeppath = 1;
+    }
+    else if (strcmp (argvec[optind], "-tt") == 0)
+    {
+      timetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
+    }
+    else if (strcmp (argvec[optind], "-rt") == 0)
+    {
+      sampratetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
+    }
     else if (strncmp (argvec[optind], "-table", 6) == 0)
     {
       table = strdup (GetOptValue (argcount, argvec, optind++));
@@ -1887,7 +1908,7 @@ ProcessParam (int argcount, char **argvec)
       ms_log(2, "%s was not compiled with Postgres support\n", PACKAGE);
 #endif
     }
-    else if (strncmp (argvec[optind], "-sqlite", 7) == 0)
+    else if (strcmp (argvec[optind], "-sqlite") == 0)
     {
       sqlitefile = strdup (GetOptValue (argcount, argvec, optind++));
     }
@@ -1911,17 +1932,9 @@ ProcessParam (int argcount, char **argvec)
     {
       dbconntrace = 1;
     }
-    else if (strcmp (argvec[optind], "-tt") == 0)
+    else if (strncmp (argvec[optind], "-sqlitebusyto", 7) == 0)
     {
-      timetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
-    }
-    else if (strcmp (argvec[optind], "-rt") == 0)
-    {
-      sampratetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
-    }
-    else if (strncmp (argvec[optind], "-kp", 3) == 0)
-    {
-      keeppath = 1;
+      sqlitebusyto = strtoul (GetOptValue (argcount, argvec, optind++), NULL, 10);
     }
     else if (strncmp (argvec[optind], "-", 1) == 0 &&
              strlen (argvec[optind]) > 1)
@@ -2252,6 +2265,10 @@ Usage (void)
            " -v             Be more verbose, multiple flags can be used\n"
            " -ns            No sync, perform data parsing but do not connect to database\n"
            "\n"
+           " -kp            Keep specified paths, by default absolute paths are stored\n"
+           " -tt secs       Specify a time tolerance for continuous traces\n"
+           " -rt diff       Specify a sample rate tolerance for continuous traces\n"
+           "\n"
            "The -table argument is required along with either -pghost or -sqlite\n"
            " -table   table Specify database table name, e.g. timeseries.tsindex\n"
 #ifndef WITHOUTPOSTGRESQL
@@ -2263,14 +2280,11 @@ Usage (void)
            " -dbname  name  Specify database name or full connection info, currently: %s\n"
            " -dbuser  user  Specify database user name, currently: %s\n"
            " -dbpass  pass  Specify database user password\n"
+           "\n"
            " -TRACE         Enable Postgres libpq tracing facility and direct output to stderr\n"
-           "\n"
-           " -tt secs       Specify a time tolerance for continuous traces\n"
-           " -rt diff       Specify a sample rate tolerance for continuous traces\n"
-           "\n"
-           " -kp            Keep specified paths, by default absolute paths are stored\n"
+           " -sqlitebusyto msec   Set the SQLite busy timeout in milliseconds, currently: %lu\n"
            "\n"
            " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
            "\n",
-           dbport, dbname, dbuser);
+           dbport, dbname, dbuser, sqlitebusyto);
 } /* End of Usage() */

@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2017/03/06
+.TH MSEEDINDEX 1 2017/03/09
 .SH NAME
 Synchronize Mini-SEED summary and index with database
 
@@ -97,8 +97,23 @@ do not synchronize the time series information with the database.
 Typically this would be used during diagnostics or testing and in
 combination the verbose option to print the time series information.
 
+.IP "-kp       "
+Keep the original file paths as specified.  By default the absolute,
+canonical path to each file is determined and stored in the database.
+
+.IP "-tt \fIsecs\fP"
+Specify a time tolerance for constructing continuous trace
+segments. The tolerance is specified in seconds.  The default
+tolerance is 1/2 of the sample period.
+
+.IP "-rt \fIdiff\fP"
+Specify a sample rate tolerance for constructing continuous trace
+segments. The tolerance is specified as the difference between two
+sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) <
+0.0001).
+
 .IP "-table \fItablename\fP"
-Specify the database table name, .e.g. 'tsindex'.  This option is
+Specify the database table name, e.g. 'tsindex'.  This option is
 required along with either \fBpghost\fP or \fBsqlite\fP.
 
 .IP "-pghost \fIhostname\fP"
@@ -120,20 +135,14 @@ Specify the database user name, default: timeseries.
 Specify the database user password.  Database specific authentication
 mechanisms may be used, such as the Postgres password file.
 
-.IP "-tt \fIsecs\fP"
-Specify a time tolerance for constructing continuous trace
-segments. The tolerance is specified in seconds.  The default
-tolerance is 1/2 of the sample period.
+.IP "-TRACE"
+Enable Postgres libpq tracing facility and direct output to stderr.
 
-.IP "-rt \fIdiff\fP"
-Specify a sample rate tolerance for constructing continuous trace
-segments. The tolerance is specified as the difference between two
-sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) <
-0.0001).
-
-.IP "-kp       "
-Keep the original file paths as specified.  By default the absolute,
-canonical path to each file is determined and stored in the database.
+.IP "-sqlitebusyto \fImilliseconds\fP"
+Set the SQLite busy timeout value in milliseconds, default is 10
+seconds.  This is the amount of time to wait for a database lock and
+may need to be tuned in special scenarios where the database is
+particularly busy, such highly concurrent usage.
 
 .SH "INPUT LIST FILE"
 A list file can be used to specify input files, one file per line.

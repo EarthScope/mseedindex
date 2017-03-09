@@ -5,9 +5,9 @@
  * synchronizes a time series summary with a database.
  *
  * PostgreSQL and SQLite3 are supported as target databases.  When
- * using Postgres the specified table is expected to exist.  When
- * using SQLite both the database file and table will be created as
- * needed, along with some indexes on common fields.
+ * using Postgres the target table is expected to exist.  When using
+ * SQLite both the database file and table will be created as needed,
+ * along with some indexes on common fields.
  *
  * The time series are grouped by NSLCQ records that are conterminous
  * in a given file, referred to as a section.  Each section will be
@@ -115,7 +115,7 @@ static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces
 static char keeppath = 0;         /* Use originally specified path, do not resolve absolute */
 static flag nosync = 0;           /* Control synchronization with database, 1 = no database */
 
-static char *table = 0;
+static char *table = "tsindex";
 static char *pghost = 0;
 static char *sqlitefile = 0;
 static unsigned long int sqlitebusyto = 10000;
@@ -1986,15 +1986,6 @@ ProcessParam (int argcount, char **argvec)
     exit (1);
   }
 
-  /* Make sure table was specified if database was specified */
-  if ((pghost || sqlitefile) && !table)
-  {
-    ms_log (2, "No database table name was specified\n\n");
-    ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
-    ms_log (1, "Try %s -h for usage\n", PACKAGE);
-    exit (1);
-  }
-
   /* Report the program version */
   if (verbose)
     ms_log (1, "%s version: %s\n", PACKAGE, VERSION);
@@ -2269,13 +2260,15 @@ Usage (void)
            " -tt secs       Specify a time tolerance for continuous traces\n"
            " -rt diff       Specify a sample rate tolerance for continuous traces\n"
            "\n"
-           "The -table argument is required along with either -pghost or -sqlite\n"
-           " -table   table Specify database table name, e.g. timeseries.tsindex\n"
 #ifndef WITHOUTPOSTGRESQL
+           "Either the -pghost or -sqlite argument is required\n"
            " -pghost  host  Specify Postgres database host, e.g. timeseriesdb\n"
+#else
+           "The -sqlite argument is required\n"
 #endif
            " -sqlite  file  Specify SQLite database file, e.g. timeseries.sqlite\n"
            "\n"
+           " -table   table Specify database table name, currently: %s\n"
            " -dbport  port  Specify database port, currently: %s\n"
            " -dbname  name  Specify database name or full connection info, currently: %s\n"
            " -dbuser  user  Specify database user name, currently: %s\n"
@@ -2286,5 +2279,5 @@ Usage (void)
            "\n"
            " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
            "\n",
-           dbport, dbname, dbuser, sqlitebusyto);
+           table, dbport, dbname, dbuser, sqlitebusyto);
 } /* End of Usage() */

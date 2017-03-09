@@ -1,6 +1,7 @@
 2017.068:
 	- Add -sqlitebusyto option to allow changes to the SQLite busy
 	timeout value.
+	- Make -table argument optional and use default of 'tsindex'.
 
 2017.066: 2.1
 	- Set SQLite busy timeout to 10 seconds to allow for graceful

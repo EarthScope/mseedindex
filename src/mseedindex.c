@@ -81,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.068
+ * modified 2017.069
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.2dev"
+#define VERSION "2.2"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1113,9 +1113,10 @@ SyncSQLite (void)
     return -1;
   }
 
-  /* Create index for (network,station,location,channel,quality) */
+  /* Create index for (network,station,location,channel,starttime,endtime) */
   rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
-                   "CREATE INDEX IF NOT EXISTS %s_nslcq_idx ON %s (network,station,location,channel,quality)",
+                   "CREATE INDEX IF NOT EXISTS %s_nslcse_idx ON %s "
+                   "(network,station,location,channel,starttime,endtime)",
                    table, table);
   if (rv != SQLITE_OK)
   {
@@ -1127,28 +1128,6 @@ SyncSQLite (void)
   /* Create index for (filename) */
   rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
                    "CREATE INDEX IF NOT EXISTS %s_filename_idx ON %s (filename)",
-                   table, table);
-  if (rv != SQLITE_OK)
-  {
-    ms_log (2, "SQLite CREATE INDEX failed: %s\n", (errmsg) ? errmsg : "");
-    sqlite3_free (errmsg);
-    return -1;
-  }
-
-  /* Create index for (starttime) */
-  rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
-                   "CREATE INDEX IF NOT EXISTS %s_starttime_idx ON %s (starttime)",
-                   table, table);
-  if (rv != SQLITE_OK)
-  {
-    ms_log (2, "SQLite CREATE INDEX failed: %s\n", (errmsg) ? errmsg : "");
-    sqlite3_free (errmsg);
-    return -1;
-  }
-
-  /* Create index for (endtime) */
-  rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
-                   "CREATE INDEX IF NOT EXISTS %s_endtime_idx ON %s (endtime)",
                    table, table);
   if (rv != SQLITE_OK)
   {

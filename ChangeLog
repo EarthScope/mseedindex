@@ -1,3 +1,6 @@
+2017.069: 2.2
+	- Combine SQLite indexes for more efficient use.
+	
 2017.068:
 	- Add -sqlitebusyto option to allow changes to the SQLite busy
 	timeout value.

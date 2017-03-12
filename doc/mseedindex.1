@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2017/03/09
+.TH MSEEDINDEX 1 2017/03/12
 .SH NAME
 Synchronize Mini-SEED summary and index with database
 
@@ -96,6 +96,12 @@ No synchronization.  Read miniSEED, determine data representation but
 do not synchronize the time series information with the database.
 Typically this would be used during diagnostics or testing and in
 combination the verbose option to print the time series information.
+
+.IP "-noup      "
+No updates.  Do not search for and delete existing database entries.
+This is more efficient when indexing data for the first time and it is
+known that no entries exist for the specified file(s).  Misuse of this
+option can result in duplicate or inappropriate index entries.
 
 .IP "-kp       "
 Keep the original file paths as specified.  By default the absolute,

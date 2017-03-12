@@ -1,4 +1,6 @@
-2917.071:
+2917.071: 2.3
+	- Add -noup (no updates) option to refrain from searching for and
+	deleting existing rows in the database.
 	- Remove double quotes from keys and values of timeindex field
 	in SQLite representation.
 

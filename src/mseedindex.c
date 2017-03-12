@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.2"
+#define VERSION "2.3"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -114,6 +114,7 @@ static double timetol = -1.0;     /* Time tolerance for continuous traces */
 static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces */
 static char keeppath = 0;         /* Use originally specified path, do not resolve absolute */
 static flag nosync = 0;           /* Control synchronization with database, 1 = no database */
+static flag noupdate = 0;         /* Control replacement of rows in database, 1 = no updating */
 
 static char *table = "tsindex";
 static char *pghost = 0;
@@ -662,80 +663,83 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   /* Search database for rows matching the filename or a version of the filename */
   if (dbconn)
   {
-    /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
-     * Include criteria to match an overlapping time range of extents, which can be used by the database. */
-    if (baselength > 0)
-      rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
-                     baselength, flp->filename,
-                     (double)MS_HPTIME2EPOCH (filelatest),
-                     (double)MS_HPTIME2EPOCH (fileearliest));
-    else
-      rv = asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
-                     flp->filename,
-                     (double)MS_HPTIME2EPOCH (filelatest),
-                     (double)MS_HPTIME2EPOCH (fileearliest));
-
-    if (rv <= 0 || !filewhere)
+    if (!noupdate)
     {
-      ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
-      return -1;
-    }
+      /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
+         Include criteria to match an overlapping time range of extents, which can be used by the database. */
+      if (baselength > 0)
+        rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                       baselength, flp->filename,
+                       (double)MS_HPTIME2EPOCH (filelatest),
+                       (double)MS_HPTIME2EPOCH (fileearliest));
+      else
+        rv = asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+                       flp->filename,
+                       (double)MS_HPTIME2EPOCH (filelatest),
+                       (double)MS_HPTIME2EPOCH (fileearliest));
 
-    if (verbose >= 2)
-      ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
-
-    matchresult = PQuery (dbconn,
-                          "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
-                          "FROM %s "
-                          "WHERE %s",
-                          table, filewhere);
-
-    if (PQresultStatus (matchresult) != PGRES_TUPLES_OK)
-    {
-      ms_log (2, "Pg SELECT failed: %s\n", PQresultErrorMessage (matchresult));
-      PQclear (matchresult);
-      if (filewhere)
-        free (filewhere);
-      return -1;
-    }
-
-    matchcount = PQntuples (matchresult);
-
-    if (verbose >= 2)
-      ms_log (1, "Found %d matching rows\n", matchcount);
-
-    /* Retain previous updated value if hash is the same by searching
-     * for matching values (hash,NSLCQ) and storing previous update time. */
-    if (matchcount > 0)
-    {
-      /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
-      for (idx = 0; idx < matchcount; idx++)
+      if (rv <= 0 || !filewhere)
       {
-        mst = flp->mstg->traces;
-        while (mst)
+        ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
+        return -1;
+      }
+
+      if (verbose >= 2)
+        ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
+
+      matchresult = PQuery (dbconn,
+                            "SELECT network,station,location,channel,quality,hash,extract (epoch from updated) "
+                            "FROM %s "
+                            "WHERE %s",
+                            table, filewhere);
+
+      if (PQresultStatus (matchresult) != PGRES_TUPLES_OK)
+      {
+        ms_log (2, "Pg SELECT failed: %s\n", PQresultErrorMessage (matchresult));
+        PQclear (matchresult);
+        if (filewhere)
+          free (filewhere);
+        return -1;
+      }
+
+      matchcount = PQntuples (matchresult);
+
+      if (verbose >= 2)
+        ms_log (1, "Found %d matching rows\n", matchcount);
+
+      /* Retain previous updated value if hash is the same by searching
+         for matching values (hash,NSLCQ) and storing previous update time. */
+      if (matchcount > 0)
+      {
+        /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
+        for (idx = 0; idx < matchcount; idx++)
         {
-          if ((sd = (struct sectiondetails *)mst->prvtptr))
+          mst = flp->mstg->traces;
+          while (mst)
           {
-            char *qp = PQgetvalue (matchresult, idx, 4);
+            if ((sd = (struct sectiondetails *)mst->prvtptr))
+            {
+              char *qp = PQgetvalue (matchresult, idx, 4);
 
-            if (!strcmp (sd->digeststr, PQgetvalue (matchresult, idx, 5)))
-              if (mst->dataquality == *qp)
-                if (!strcmp (mst->channel, PQgetvalue (matchresult, idx, 3)))
-                  if (!strcmp (mst->location, PQgetvalue (matchresult, idx, 2)))
-                    if (!strcmp (mst->station, PQgetvalue (matchresult, idx, 1)))
-                      if (!strcmp (mst->network, PQgetvalue (matchresult, idx, 0)))
-                      {
-                        sd->updated = strtoll (PQgetvalue (matchresult, idx, 6), NULL, 10);
-                      }
+              if (!strcmp (sd->digeststr, PQgetvalue (matchresult, idx, 5)))
+                if (mst->dataquality == *qp)
+                  if (!strcmp (mst->channel, PQgetvalue (matchresult, idx, 3)))
+                    if (!strcmp (mst->location, PQgetvalue (matchresult, idx, 2)))
+                      if (!strcmp (mst->station, PQgetvalue (matchresult, idx, 1)))
+                        if (!strcmp (mst->network, PQgetvalue (matchresult, idx, 0)))
+                        {
+                          sd->updated = strtoll (PQgetvalue (matchresult, idx, 6), NULL, 10);
+                        }
+            }
+
+            mst = mst->next;
           }
-
-          mst = mst->next;
         }
       }
-    }
 
-    PQclear (matchresult);
-    matchresult = NULL;
+      PQclear (matchresult);
+      matchresult = NULL;
+    } /* if (noupdate) */
 
     /* Start a transaction block */
     result = PQexec (dbconn, "BEGIN TRANSACTION");
@@ -1275,93 +1279,96 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       return -1;
     }
 
-    /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
-     * Include criteria to match an overlapping time range of extents, which can be used by the database. */
-    if (baselength > 0)
-      rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= '%s' AND endtime >= '%s'",
-                     baselength, flp->filename, latest, earliest);
-    else
-      rv = asprintf (&filewhere, "filename='%s' AND starttime <= '%s' AND endtime >= '%s'",
-                     flp->filename, latest, earliest);
-
-    if (rv <= 0 || !filewhere)
+    if (!noupdate)
     {
-      ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
-      return -1;
-    }
+      /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
+         Include criteria to match an overlapping time range of extents, which can be used by the database. */
+      if (baselength > 0)
+        rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= '%s' AND endtime >= '%s'",
+                       baselength, flp->filename, latest, earliest);
+      else
+        rv = asprintf (&filewhere, "filename='%s' AND starttime <= '%s' AND endtime >= '%s'",
+                       flp->filename, latest, earliest);
 
-    if (verbose >= 2)
-      ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
-
-    rv = SQLitePrepare (dbconn, &statement,
-                        "SELECT network,station,location,channel,quality,hash,updated "
-                        "FROM %s "
-                        "WHERE %s",
-                        table, filewhere);
-    if (rv != SQLITE_OK)
-    {
-      ms_log (2, "SQLite SELECT preparation failed: %s\n", sqlite3_errstr (rv));
-      if (filewhere)
-        free (filewhere);
-      return -1;
-    }
-
-    /* Retain previous updated value if hash is the same by searching
-     * for matching values (hash,NSLCQ) and storing previous update time. */
-    matchcount = 0;
-    while ((rv = sqlite3_step (statement)) == SQLITE_ROW)
-    {
-      matchcount++;
-
-      /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
-      for (idx = 0; idx < matchcount; idx++)
+      if (rv <= 0 || !filewhere)
       {
-        mst = flp->mstg->traces;
-        while (mst)
+        ms_log (2, "Cannot allocate memory for WHERE filename clause\n", flp->filename);
+        return -1;
+      }
+
+      if (verbose >= 2)
+        ms_log (1, "Searching for rows matching '%s'\n", flp->filename);
+
+      rv = SQLitePrepare (dbconn, &statement,
+                          "SELECT network,station,location,channel,quality,hash,updated "
+                          "FROM %s "
+                          "WHERE %s",
+                          table, filewhere);
+      if (rv != SQLITE_OK)
+      {
+        ms_log (2, "SQLite SELECT preparation failed: %s\n", sqlite3_errstr (rv));
+        if (filewhere)
+          free (filewhere);
+        return -1;
+      }
+
+      /* Retain previous updated value if hash is the same by searching
+         for matching values (hash,NSLCQ) and storing previous update time. */
+      matchcount = 0;
+      while ((rv = sqlite3_step (statement)) == SQLITE_ROW)
+      {
+        matchcount++;
+
+        /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
+        for (idx = 0; idx < matchcount; idx++)
         {
-          if ((sd = (struct sectiondetails *)mst->prvtptr))
+          mst = flp->mstg->traces;
+          while (mst)
           {
-            const unsigned char *qp = sqlite3_column_text (statement, 4);
-            hptime_t hpupdated;
+            if ((sd = (struct sectiondetails *)mst->prvtptr))
+            {
+              const unsigned char *qp = sqlite3_column_text (statement, 4);
+              hptime_t hpupdated;
 
-            if (!strcmp (sd->digeststr, (char *)sqlite3_column_text (statement, 5)))
-              if (mst->dataquality == *qp)
-                if (!strcmp (mst->channel, (char *)sqlite3_column_text (statement, 3)))
-                  if (!strcmp (mst->location, (char *)sqlite3_column_text (statement, 2)))
-                    if (!strcmp (mst->station, (char *)sqlite3_column_text (statement, 1)))
-                      if (!strcmp (mst->network, (char *)sqlite3_column_text (statement, 0)))
-                      {
-                        hpupdated = ms_timestr2hptime ((char *)sqlite3_column_text (statement, 6));
-
-                        if (hpupdated == HPTERROR)
+              if (!strcmp (sd->digeststr, (char *)sqlite3_column_text (statement, 5)))
+                if (mst->dataquality == *qp)
+                  if (!strcmp (mst->channel, (char *)sqlite3_column_text (statement, 3)))
+                    if (!strcmp (mst->location, (char *)sqlite3_column_text (statement, 2)))
+                      if (!strcmp (mst->station, (char *)sqlite3_column_text (statement, 1)))
+                        if (!strcmp (mst->network, (char *)sqlite3_column_text (statement, 0)))
                         {
-                          ms_log (1, "Warning: could not convert 'updated' time value: '%s'\n",
-                                  sqlite3_column_text (statement, 6));
+                          hpupdated = ms_timestr2hptime ((char *)sqlite3_column_text (statement, 6));
+
+                          if (hpupdated == HPTERROR)
+                          {
+                            ms_log (1, "Warning: could not convert 'updated' time value: '%s'\n",
+                                    sqlite3_column_text (statement, 6));
+                          }
+
+                          /* Convert to time_t with simple rounding */
+                          sd->updated = (double)MS_HPTIME2EPOCH (hpupdated) + 0.5;
                         }
+            }
 
-                        /* Convert to time_t with simple rounding */
-                        sd->updated = (double)MS_HPTIME2EPOCH (hpupdated) + 0.5;
-                      }
+            mst = mst->next;
           }
-
-          mst = mst->next;
         }
       }
-    }
 
-    if (rv != SQLITE_DONE)
-    {
-      ms_log (2, "Cannot step through SQLite results: %s\n", sqlite3_errstr (rv));
+      if (rv != SQLITE_DONE)
+      {
+        ms_log (2, "Cannot step through SQLite results: %s\n", sqlite3_errstr (rv));
+        sqlite3_finalize (statement);
+        if (filewhere)
+          free (filewhere);
+        return -1;
+      }
+
       sqlite3_finalize (statement);
-      if (filewhere)
-        free (filewhere);
-      return -1;
-    }
 
-    sqlite3_finalize (statement);
-
-    if (verbose >= 2)
-      ms_log (1, "Found %d matching rows\n", matchcount);
+      if (verbose >= 2)
+        ms_log (1, "Found %d matching rows\n", matchcount);
+    } /* if (noupdate) */
 
     /* Start a transaction block */
     rv = SQLiteExec (dbconn, NULL, NULL, &errmsg, "BEGIN TRANSACTION");
@@ -1863,6 +1870,10 @@ ProcessParam (int argcount, char **argvec)
     {
       nosync = 1;
     }
+    else if (strncmp (argvec[optind], "-noup", 5) == 0)
+    {
+      noupdate = 1;
+    }
     else if (strncmp (argvec[optind], "-kp", 3) == 0)
     {
       keeppath = 1;
@@ -2235,6 +2246,7 @@ Usage (void)
            " -v             Be more verbose, multiple flags can be used\n"
            " -ns            No sync, perform data parsing but do not connect to database\n"
            "\n"
+           " -noup          No updates, do not search for and replace index rows\n"
            " -kp            Keep specified paths, by default absolute paths are stored\n"
            " -tt secs       Specify a time tolerance for continuous traces\n"
            " -rt diff       Specify a sample rate tolerance for continuous traces\n"

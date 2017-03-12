@@ -74,9 +74,25 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">No synchronization.  Read miniSEED, determine data representation but do not synchronize the time series information with the database. Typically this would be used during diagnostics or testing and in combination the verbose option to print the time series information.</p>
 
+<b>-noup</b>
+
+<p style="padding-left: 30px;">No updates.  Do not search for and delete existing database entries. This is more efficient when indexing data for the first time and it is known that no entries exist for the specified file(s).  Misuse of this option can result in duplicate or inappropriate index entries.</p>
+
+<b>-kp</b>
+
+<p style="padding-left: 30px;">Keep the original file paths as specified.  By default the absolute, canonical path to each file is determined and stored in the database.</p>
+
+<b>-tt </b><i>secs</i>
+
+<p style="padding-left: 30px;">Specify a time tolerance for constructing continuous trace segments. The tolerance is specified in seconds.  The default tolerance is 1/2 of the sample period.</p>
+
+<b>-rt </b><i>diff</i>
+
+<p style="padding-left: 30px;">Specify a sample rate tolerance for constructing continuous trace segments. The tolerance is specified as the difference between two sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) < 0.0001).</p>
+
 <b>-table </b><i>tablename</i>
 
-<p style="padding-left: 30px;">Specify the database table name, .e.g. 'tsindex'.  This option is required along with either <b>pghost</b> or <b>sqlite</b>.</p>
+<p style="padding-left: 30px;">Specify the database table name, default value is 'tsindex'.</p>
 
 <b>-pghost </b><i>hostname</i>
 
@@ -98,17 +114,13 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">Specify the database user password.  Database specific authentication mechanisms may be used, such as the Postgres password file.</p>
 
-<b>-tt </b><i>secs</i>
+<b>-TRACE</b>
 
-<p style="padding-left: 30px;">Specify a time tolerance for constructing continuous trace segments. The tolerance is specified in seconds.  The default tolerance is 1/2 of the sample period.</p>
+<p style="padding-left: 30px;">Enable Postgres libpq tracing facility and direct output to stderr.</p>
 
-<b>-rt </b><i>diff</i>
+<b>-sqlitebusyto </b><i>milliseconds</i>
 
-<p style="padding-left: 30px;">Specify a sample rate tolerance for constructing continuous trace segments. The tolerance is specified as the difference between two sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) < 0.0001).</p>
-
-<b>-kp</b>
-
-<p style="padding-left: 30px;">Keep the original file paths as specified.  By default the absolute, canonical path to each file is determined and stored in the database.</p>
+<p style="padding-left: 30px;">Set the SQLite busy timeout value in milliseconds, default is 10 seconds.  This is the amount of time to wait for a database lock and may need to be tuned in special scenarios where the database is particularly busy, such highly concurrent usage.</p>
 
 ## <a id='input-list-file'>Input List File</a>
 
@@ -144,4 +156,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2017/03/06)
+(man page 2017/03/12)

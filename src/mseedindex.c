@@ -81,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.069
+ * modified 2017.071
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -1410,7 +1410,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
 
       while (tindex)
       {
-        snprintf (tmpstring, sizeof (tmpstring), "\"%.6f\"=>\"%lld\"",
+        snprintf (tmpstring, sizeof (tmpstring), "%.6f=>%lld",
                   (double)MS_HPTIME2EPOCH (tindex->time),
                   (long long int)tindex->byteoffset);
 
@@ -1426,7 +1426,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       /* Add 'latest' indicator to time index.  If the data section contains data
        * records only in progressing time order, then the index also identifies
        * offsets to the latest data. */
-      snprintf (tmpstring, sizeof (tmpstring), "\"latest\"=>\"%d\"", sd->timeorderrecords);
+      snprintf (tmpstring, sizeof (tmpstring), "latest=>%d", sd->timeorderrecords);
 
       if (AddToString (&indexstr, tmpstring, ",", 0, 8388608))
       {

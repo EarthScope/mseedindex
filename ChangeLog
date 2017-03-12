@@ -1,3 +1,7 @@
+2917.071:
+	- Remove double quotes from keys and values of timeindex field
+	in SQLite representation.
+
 2017.069: 2.2
 	- Combine SQLite indexes for more efficient use.
 	

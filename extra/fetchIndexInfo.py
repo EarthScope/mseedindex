@@ -21,7 +21,11 @@
 #     FROM tsindex
 #     GROUP BY 1,2,3,4;
 #
-# Modified: 2017.085
+# The 'all_channel_summary' table is used to:
+#   a) resolve wildcards, allowing the use of '=' operator and thus table index
+#   b) reduce index table search to channels that are known to be present
+#
+# Modified: 2017.086
 # Written by Chad Trabant, IRIS Data Management Center
 
 from __future__ import print_function
@@ -33,7 +37,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.1'
+version = '1.2dev'
 verbose = 0
 table = 'tsindex'
 

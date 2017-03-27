@@ -11,17 +11,17 @@
 # range.  A selection may be specified using command line options or by
 # specifying a file containing one or more independent selections.
 #
-# This script requires the existence of an 'all_channel_summary' table
-# that is a summary of the index.  This is normally created with a
-# a statement like:
+# If present, an 'all_channel_summary' table that summarizes the time
+# extents of each channel in the index is used to optimize the query
+# to the index.  This is normally created with a statement like:
 #
 # CREATE TABLE all_channel_summary AS
 #   SELECT network,station,location,channel,
-#     min(starttime) AS starttime, max(endtime) AS endtime, datetime('now') as updated
+#     min(starttime) AS earliest, max(endtime) AS latest, datetime('now') as updt
 #     FROM tsindex
 #     GROUP BY 1,2,3,4;
 #
-# Modified: 2017.072
+# Modified: 2017.085
 # Written by Chad Trabant, IRIS Data Management Center
 
 from __future__ import print_function
@@ -33,7 +33,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.0'
+version = '1.1'
 verbose = 0
 table = 'tsindex'
 
@@ -49,14 +49,15 @@ def main():
     channel = None
     starttime = None
     endtime = None
+    filename = None
     sync = False
 
     try:
         opts, args = getopt.gnu_getopt(sys.argv[1:],
-                                       "vhl:t:N:S:L:C:s:e:",
+                                       "vhl:t:N:S:L:C:s:e:f:",
                                        ["verbose","help", "listfile=", "table=",
                                         "network=","station=","location=","channel=",
-                                        "starttime=", "endtime=", "SYNC"])
+                                        "starttime=", "endtime=", "filename=", "SYNC"])
     except Exception as err:
         print (str(err))
         usage()
@@ -84,6 +85,8 @@ def main():
             starttime = a
         elif o in ("-e", "--endtime"):
             endtime = a
+        elif o in ("-f", "--filename"):
+            filename = a
         elif o == "--SYNC":
             sync = True
         else:
@@ -124,7 +127,7 @@ def main():
 
         request.append([network,station,location,channel,starttime,endtime])
 
-    if len(request) <= 0:
+    if len(request) <= 0 and filename is None:
         print ("No selection specified, try -h for usage")
         sys.exit()
 
@@ -134,7 +137,7 @@ def main():
             print ("  {0}: {1}".format(len(req), req))
 
     try:
-        index_rows = fetch_index_rows(sqlitefile, request, table)
+        index_rows = fetch_index_rows(sqlitefile, table, request, filename)
     except Exception as err:
         print ("Error fetching index rows from '{0}':\n  {1}".format(sqlitefile, err))
         sys.exit(2)
@@ -201,11 +204,13 @@ def read_request_file(requestfile):
 
     return request
 
-def fetch_index_rows(sqlitefile, request, table):
+def fetch_index_rows(sqlitefile, table, request, filename):
     '''Fetch index rows matching specified request[]
 
     `sqlitefile`: SQLite3 database file
+    `table`: Target database table name
     `request`: List of tuples containing (net,sta,loc,chan,start,end)
+    `filename`: Limit results to filename (or comma-separated list of)
 
     Request elements may contain '?' and '*' wildcards.  The start and
     end elements can be a single '*' if not a date-time string.
@@ -227,16 +232,53 @@ def fetch_index_rows(sqlitefile, request, table):
     except Exception as err:
         raise ValueError(str(err))
 
-    cur = conn.cursor()
+    cursor = conn.cursor()
+
+    if len(request) > 0:
+        index_rows = fetch_index_by_request(cursor, table, request, filename)
+    elif filename:
+        index_rows = fetch_index_by_filename(cursor, table, filename)
+    else:
+        print ("No criteria (request selections or filename), nothing to do.")
+
+    # Print time series index rows
+    if verbose >= 3:
+        print ("TSINDEX:")
+        for row in index_rows:
+            print ("  ", row)
+
+    conn.close()
+
+    return index_rows
+
+def fetch_index_by_request(cursor, table, request, filename):
+    '''Fetch index rows matching specified request[]
+
+    `cursor`: Database cursor
+    `table`: Target database table
+    `request`: List of tuples containing (net,sta,loc,chan,start,end)
+    `filename`: Limit results to filename (or comma-separated list of)
+
+    Request elements may contain '?' and '*' wildcards.  The start and
+    end elements can be a single '*' if not a date-time string.
+
+    Return rows as list of tuples containing:
+    (network,station,location,channel,quality,starttime,endtime,samplerate,
+     filename,byteoffset,bytes,hash,timeindex,timespans,timerates,
+     format,filemodtime,updated,scanned)
+    '''
+
+    global verbose
+    index_rows = []
 
     # Create temporary table and load request
     try:
         if verbose >= 2:
             print ("Creating temporary request table")
 
-        cur.execute("CREATE TEMPORARY TABLE request "
-                    "(network TEXT, station TEXT, location TEXT, channel TEXT, "
-                    "starttime TEXT, endtime TEXT) ")
+        cursor.execute("CREATE TEMPORARY TABLE request "
+                       "(network TEXT, station TEXT, location TEXT, channel TEXT, "
+                       "starttime TEXT, endtime TEXT) ")
 
         if verbose >= 2:
             print ("Populating temporary request table")
@@ -246,8 +288,8 @@ def fetch_index_rows(sqlitefile, request, table):
             if req[2] == "--":
                 req[2] = "";
 
-            cur.execute("INSERT INTO request (network,station,location,channel,starttime,endtime) "
-                        "VALUES (?,?,?,?,?,?) ", req)
+            cursor.execute("INSERT INTO request (network,station,location,channel,starttime,endtime) "
+                           "VALUES (?,?,?,?,?,?) ", req)
 
         if verbose >= 2:
             print ("Request table populated")
@@ -256,83 +298,181 @@ def fetch_index_rows(sqlitefile, request, table):
 
     # Print request table
     if verbose >= 3:
-        cur.execute ("SELECT * FROM request")
-        rows = cur.fetchall()
+        cursor.execute ("SELECT * FROM request")
+        rows = cursor.fetchall()
         print ("REQUEST:")
         for row in rows:
             print ("  ", row)
 
-    # Create temporary resolved table as a join between request and all_channel_summary to:
-    # a) resolve wildcards, allows use of '=' operator and table index
-    # b) reduce index table search to channels that are known included
-    try:
-        if verbose >= 2:
-            print ("Creating temporary resolved table")
+    # Determine if any wildcards are used
+    wildcards = False
+    for req in request:
+        for field in req:
+            if '*' in field or '?' in field:
+                wildcards = True
+                break
 
-        cur.execute("CREATE TEMPORARY TABLE resolved "
-                    "(network TEXT, station TEXT, location TEXT, channel TEXT, "
-                    "starttime TEXT, endtime TEXT) ")
+    # Determine if all_channel_summary table exists
+    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' and name='all_channel_summary'");
+    acs_present = cursor.fetchone()[0]
 
-        if verbose >= 2:
-            print ("Populating temporary resolved table")
+    if wildcards:
+        # Resolve wildcards using all_channel_summary if present to:
+        # a) resolve wildcards, allows use of '=' operator and table index
+        # b) reduce index table search to channels that are known included
+        if acs_present:
+            resolve_request(cursor, "request")
+            wildcards = False
+        # Replace wildcarded starttime and endtime with extreme date-times
+        else:
+            cursor.execute("UPDATE request SET starttime='0000-00-00T00:00:00' WHERE starttime='*'")
+            cursor.execute("UPDATE request SET endtime='5000-00-00T00:00:00' WHERE endtime='*'")
 
-        cur.execute("INSERT INTO resolved (network,station,location,channel,starttime,endtime) "
-                    "SELECT s.network,s.station,s.location,s.channel,r.starttime,r.endtime "
-                    "FROM all_channel_summary s, request r "
-                    "WHERE "
-                    "  (r.starttime='*' OR r.starttime <= s.endtime) "
-                    "  AND (r.endtime='*' OR r.endtime >= s.starttime) "
-                    "  AND (r.network='*' OR s.network GLOB r.network) "
-                    "  AND (r.station='*' OR s.station GLOB r.station) "
-                    "  AND (r.location='*' OR s.location GLOB r.location) "
-                    "  AND (r.channel='*' OR s.channel GLOB r.channel) ")
-    except Exception as err:
-        raise ValueError(str(err))
-
-    resolvedrows = cur.execute("SELECT COUNT(*) FROM resolved").fetchone()[0]
-
-    # Print resolved table
-    if verbose >= 3:
-        cur.execute ("SELECT * FROM resolved")
-        rows = cur.fetchall()
-        print ("RESOLVED ({0} rows):".format(resolvedrows))
-        for row in rows:
-            print ("  ", row)
-
-    # Fetch final results by joining resolved and index table
+    # Fetch final results by joining reqeust and index table
     try:
         if verbose >= 2:
             print ("Fetching index entries")
 
-        cur.execute("SELECT ts.network,ts.station,ts.location,ts.channel,ts.quality, "
-                    "ts.starttime,ts.endtime,ts.samplerate, "
-                    "ts.filename,ts.byteoffset,ts.bytes,ts.hash, "
-                    "ts.timeindex,ts.timespans,ts.timerates, "
-                    "ts.format,ts.filemodtime,ts.updated,ts.scanned "
-                    "FROM {0} ts, resolved r "
-                    "WHERE "
-                    "  (r.starttime='*' OR r.starttime <= ts.endtime) "
-                    "  AND (r.endtime='*' OR r.endtime >= ts.starttime) "
-                    "  AND ts.network = r.network "
-                    "  AND ts.station = r.station "
-                    "  AND ts.location = r.location "
-                    "  AND ts.channel = r.channel "
-                    "ORDER BY ts.network,ts.station,ts.location,ts.channel,"
-                    "ts.quality,ts.starttime".format(table))
+        statement = ("SELECT ts.network,ts.station,ts.location,ts.channel,ts.quality, "
+                     "  ts.starttime,ts.endtime,ts.samplerate, "
+                     "  ts.filename,ts.byteoffset,ts.bytes,ts.hash, "
+                     "  ts.timeindex,ts.timespans,ts.timerates, "
+                     "  ts.format,ts.filemodtime,ts.updated,ts.scanned "
+                     "FROM {0} ts, request r "
+                     "WHERE "
+                     "  ts.endtime >= r.starttime "
+                     "  AND ts.starttime <= r.endtime "
+                     "  AND ts.network {1} r.network "
+                     "  AND ts.station {1} r.station "
+                     "  AND ts.location {1} r.location "
+                     "  AND ts.channel {1} r.channel ".format(table, "GLOB" if wildcards else "="))
+
+        if filename:
+            statement += ("  AND ts.filename IN ({0}) ".
+                          format(','.join("'" + item + "'" for item in filename.split(','))))
+
+        statement += " ORDER BY ts.network,ts.station,ts.location,ts.channel,ts.quality,ts.starttime"
+
+        if verbose >= 4:
+            print ("STATEMENT:\n{0}".format(statement))
+
+        cursor.execute(statement)
+
     except Exception as err:
         raise ValueError(str(err))
 
-    index_rows = cur.fetchall()
+    index_rows = cursor.fetchall()
 
-    # Print time series index rows
+    cursor.execute("DROP TABLE request")
+
+    return index_rows
+
+def resolve_request(cursor, requesttable):
+    '''Resolve request table using all_channel_summary
+
+    `cursor`: Database cursor
+    `requesttable`: request table to resolve
+
+    Resolve any '?' and '*' wildcards in the specified request table.
+    The original table is renamed, rebuilt with a join to all_channel_summary
+    and then original table is then removed.
+    '''
+
+    global verbose
+    requesttable_orig = requesttable + "_orig"
+
+    if verbose >= 1:
+        print ("Resolving request using all_channel_summary")
+
+    # Rename request table
+    try:
+        cursor.execute("ALTER TABLE {0} RENAME TO {1}".format(requesttable, requesttable_orig))
+    except Exception as err:
+        raise ValueError(str(err))
+
+    # Create resolved request table by joining with all_channel_summary
+    try:
+        cursor.execute("CREATE TEMPORARY TABLE {0} "
+                       "(network TEXT, station TEXT, location TEXT, channel TEXT, "
+                       "starttime TEXT, endtime TEXT) ".format(requesttable))
+
+        if verbose >= 2:
+            print ("Populating resolved request table")
+
+        cursor.execute("INSERT INTO {0} (network,station,location,channel,starttime,endtime) "
+                       "SELECT s.network,s.station,s.location,s.channel,"
+                       "CASE WHEN r.starttime='*' THEN s.earliest ELSE r.starttime END,"
+                       "CASE WHEN r.endtime='*' THEN s.latest ELSE r.endtime END "
+                       "FROM all_channel_summary s, {1} r "
+                       "WHERE "
+                       "  (r.starttime='*' OR r.starttime <= s.latest) "
+                       "  AND (r.endtime='*' OR r.endtime >= s.earliest) "
+                       "  AND (r.network='*' OR s.network GLOB r.network) "
+                       "  AND (r.station='*' OR s.station GLOB r.station) "
+                       "  AND (r.location='*' OR s.location GLOB r.location) "
+                       "  AND (r.channel='*' OR s.channel GLOB r.channel) ".format(requesttable,requesttable_orig))
+
+    except Exception as err:
+        raise ValueError(str(err))
+
+    resolvedrows = cursor.execute("SELECT COUNT(*) FROM request").fetchone()[0]
+
+    # Print resolved request table
     if verbose >= 3:
-        print ("TSINDEX")
-        for row in index_rows:
+        cursor.execute ("SELECT * FROM request")
+        rows = cursor.fetchall()
+        print ("RESOLVED ({0} rows):".format(resolvedrows))
+        for row in rows:
             print ("  ", row)
 
-    cur.execute("DROP TABLE request")
-    cur.execute("DROP TABLE resolved")
-    conn.close()
+    cursor.execute("DROP TABLE {0}".format(requesttable_orig))
+
+    return
+
+def fetch_index_by_filename(cursor, table, filename):
+    '''Fetch index rows matching specified filename(s)
+
+    `cursor`: Database cursor
+    `filename`: Limit results to filename (or comma-separated list of)
+
+    Request elements may contain '?' and '*' wildcards.  The start and
+    end elements can be a single '*' if not a date-time string.
+
+    Return rows as list of tuples containing:
+    (network,station,location,channel,quality,starttime,endtime,samplerate,
+     filename,byteoffset,bytes,hash,timeindex,timespans,timerates,
+     format,filemodtime,updated,scanned)
+    '''
+
+    global verbose
+    index_rows = []
+
+    # Fetch final results limiting to specified filename(s)
+    try:
+        if verbose >= 2:
+            print ("Fetching index entries based on filename")
+
+        statement = ("SELECT ts.network,ts.station,ts.location,ts.channel,ts.quality, "
+                     "  ts.starttime,ts.endtime,ts.samplerate, "
+                     "  ts.filename,ts.byteoffset,ts.bytes,ts.hash, "
+                     "  ts.timeindex,ts.timespans,ts.timerates, "
+                     "  ts.format,ts.filemodtime,ts.updated,ts.scanned "
+                     "FROM {0} ts "
+                     "WHERE "
+                     "  ts.filename IN ({1}) ".
+                     format(table, ','.join("'" + item + "'" for item in filename.split(','))))
+
+        statement += " ORDER BY ts.network,ts.station,ts.location,ts.channel,ts.quality,ts.starttime"
+
+        if verbose >= 4:
+            print ("STATEMENT:\n{0}".format(statement))
+
+        cursor.execute(statement)
+
+    except Exception as err:
+        raise ValueError(str(err))
+
+    index_rows = cursor.fetchall()
 
     return index_rows
 
@@ -372,22 +512,23 @@ def print_info(index_rows):
 
             print ("  {0} => {1}".format(time,offset))
 
-        # If per-span sample rates are present create a list of them
-        rates = None
-        if NRow.timerates:
-            rates = NRow.timerates.split(',')
+        if NRow.timespans:
+            # If per-span sample rates are present create a list of them
+            rates = None
+            if NRow.timerates:
+                rates = NRow.timerates.split(',')
 
-        # Print time spans either with or without per-span rates
-        print ("Time spans:")
-        for idx, span in enumerate(NRow.timespans.split(',')):
-            (start,end) = span.lstrip('[').rstrip(']').split(':')
-            if rates:
-                print ("  {0} - {1} ({2})".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
-                                               datetime.datetime.utcfromtimestamp(float(end)).isoformat(' '),
-                                               rates[idx]))
-            else:
-                print ("  {0} - {1}".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
-                                      datetime.datetime.utcfromtimestamp(float(end)).isoformat(' ')))
+            # Print time spans either with or without per-span rates
+            print ("Time spans:")
+            for idx, span in enumerate(NRow.timespans.split(',')):
+                (start,end) = span.lstrip('[').rstrip(']').split(':')
+                if rates:
+                    print ("  {0} - {1} ({2})".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
+                                                      datetime.datetime.utcfromtimestamp(float(end)).isoformat(' '),
+                                                      rates[idx]))
+                else:
+                    print ("  {0} - {1}".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
+                                                datetime.datetime.utcfromtimestamp(float(end)).isoformat(' ')))
 
     return
 
@@ -409,33 +550,34 @@ def print_sync(index_rows):
     for row in index_rows:
         NRow = NamedRow(*row)
 
-        # If per-span sample rates are present create a list of them
-        rates = None
-        if NRow.timerates:
-            rates = NRow.timerates.split(',')
+        if NRow.timespans:
+            # If per-span sample rates are present create a list of them
+            rates = None
+            if NRow.timerates:
+                rates = NRow.timerates.split(',')
 
-        # Print time spans either with or without per-span rates
-        for idx, span in enumerate(NRow.timespans.split(',')):
-            (start,end) = span.lstrip('[').rstrip(']').split(':')
+            # Print time spans either with or without per-span rates
+            for idx, span in enumerate(NRow.timespans.split(',')):
+                (start,end) = span.lstrip('[').rstrip(']').split(':')
 
-            starttime = datetime.datetime.utcfromtimestamp(float(start)).strftime("%Y,%j,%H:%M:%S.%f")
-            endtime = datetime.datetime.utcfromtimestamp(float(end)).strftime("%Y,%j,%H:%M:%S.%f")
-            updated = datetime.datetime.strptime(NRow.updated, "%Y-%m-%dT%H:%M:%S").strftime("%Y,%j")
+                starttime = datetime.datetime.utcfromtimestamp(float(start)).strftime("%Y,%j,%H:%M:%S.%f")
+                endtime = datetime.datetime.utcfromtimestamp(float(end)).strftime("%Y,%j,%H:%M:%S.%f")
+                updated = datetime.datetime.strptime(NRow.updated, "%Y-%m-%dT%H:%M:%S").strftime("%Y,%j")
 
-            if rates:
-                print ("{0}|{1}|{2}|{3}|{4}|{5}||{6}||||{7}||NC|{8}||".
-                       format(NRow.network,NRow.station,NRow.location,NRow.channel,
-                              starttime,endtime,
-                              rates[idx],
-                              NRow.quality,
-                              updated))
-            else:
-                print ("{0}|{1}|{2}|{3}|{4}|{5}||{6}||||{7}||NC|{8}||".
-                       format(NRow.network,NRow.station,NRow.location,NRow.channel,
-                              starttime,endtime,
-                              NRow.samplerate,
-                              NRow.quality,
-                              updated))
+                if rates:
+                    print ("{0}|{1}|{2}|{3}|{4}|{5}||{6}||||{7}||NC|{8}||".
+                           format(NRow.network,NRow.station,NRow.location,NRow.channel,
+                                  starttime,endtime,
+                                  rates[idx],
+                                  NRow.quality,
+                                  updated))
+                else:
+                    print ("{0}|{1}|{2}|{3}|{4}|{5}||{6}||||{7}||NC|{8}||".
+                           format(NRow.network,NRow.station,NRow.location,NRow.channel,
+                                  starttime,endtime,
+                                  NRow.samplerate,
+                                  NRow.quality,
+                                  updated))
 
     return
 
@@ -469,6 +611,7 @@ def usage():
     print ("  -C chan   Specify channel codes")
     print ("  -s start  Specify start time in YYYY-MM-DDThh:mm:ss.ffffff format")
     print ("  -s end    Specify end time in YYYY-MM-DDThh:mm:ss.ffffff format")
+    print ("  -f file   Limit results to specified filename")
     print ()
     print ("  --SYNC    Print results as SYNC listing instead of default details")
     print ()

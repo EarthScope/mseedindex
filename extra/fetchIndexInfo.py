@@ -40,6 +40,7 @@ import sqlite3
 version = '1.2dev'
 verbose = 0
 table = 'tsindex'
+dbconn = None
 
 def main():
     global verbose
@@ -226,17 +227,18 @@ def fetch_index_rows(sqlitefile, table, request, filename):
     '''
 
     global verbose
+    global dbconn
     index_rows = []
 
     if not os.path.exists(sqlitefile):
         raise ValueError("Database not found: {0}".format(sqlitefile))
 
     try:
-        conn = sqlite3.connect(sqlitefile, 10.0)
+        dbconn = sqlite3.connect(sqlitefile, 10.0)
     except Exception as err:
         raise ValueError(str(err))
 
-    cursor = conn.cursor()
+    cursor = dbconn.cursor()
 
     if len(request) > 0:
         index_rows = fetch_index_by_request(cursor, table, request, filename)
@@ -251,7 +253,8 @@ def fetch_index_rows(sqlitefile, table, request, filename):
         for row in index_rows:
             print ("  ", row)
 
-    conn.close()
+    dbconn.close()
+    dbconn = None
 
     return index_rows
 
@@ -355,8 +358,6 @@ def fetch_index_by_request(cursor, table, request, filename):
             statement += ("  AND ts.filename IN ({0}) ".
                           format(','.join("'" + item + "'" for item in filename.split(','))))
 
-        statement += " ORDER BY ts.network,ts.station,ts.location,ts.channel,ts.quality,ts.starttime"
-
         if verbose >= 4:
             print ("STATEMENT:\n{0}".format(statement))
 
@@ -366,6 +367,9 @@ def fetch_index_by_request(cursor, table, request, filename):
         raise ValueError(str(err))
 
     index_rows = cursor.fetchall()
+
+    # Sort results in application (ORDER BY in SQL triggers bad index usage)
+    index_rows.sort()
 
     cursor.execute("DROP TABLE request")
 
@@ -466,8 +470,6 @@ def fetch_index_by_filename(cursor, table, filename):
                      "  ts.filename IN ({1}) ".
                      format(table, ','.join("'" + item + "'" for item in filename.split(','))))
 
-        statement += " ORDER BY ts.network,ts.station,ts.location,ts.channel,ts.quality,ts.starttime"
-
         if verbose >= 4:
             print ("STATEMENT:\n{0}".format(statement))
 
@@ -477,6 +479,9 @@ def fetch_index_by_filename(cursor, table, filename):
         raise ValueError(str(err))
 
     index_rows = cursor.fetchall()
+
+    # Sort results in application (ORDER BY in SQL triggers bad index usage)
+    index_rows.sort()
 
     return index_rows
 

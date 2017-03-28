@@ -37,7 +37,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.2dev'
+version = '1.2'
 verbose = 0
 table = 'tsindex'
 dbconn = None
@@ -113,19 +113,19 @@ def main():
 
     # Add request specified as command line options
     if network or station or location or channel or starttime or endtime:
-        if not network:
+        if network is None:
             network = '*'
-        if not station:
+        if station is None:
             station = '*'
-        if not location:
+        if location is None:
             location = '*'
-        if not channel:
+        if channel is None:
             channel = '*'
-        if not starttime:
+        if starttime is None:
             starttime = '*'
         else:
             starttime = normalize_datetime (starttime)
-        if not endtime:
+        if endtime is None:
             endtime = '*'
         else:
             endtime = normalize_datetime (endtime)

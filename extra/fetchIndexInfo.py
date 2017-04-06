@@ -13,7 +13,7 @@
 #
 # If present, an 'all_channel_summary' table that summarizes the time
 # extents of each channel in the index is used to optimize the query
-# to the index.  This is normally created with a statement like:
+# to the index.  This table can be created with the following statement:
 #
 # CREATE TABLE all_channel_summary AS
 #   SELECT network,station,location,channel,
@@ -25,19 +25,22 @@
 #   a) resolve wildcards, allowing the use of '=' operator and thus table index
 #   b) reduce index table search to channels that are known to be present
 #
-# Modified: 2017.086
+# Modified: 2017.095
 # Written by Chad Trabant, IRIS Data Management Center
 
 from __future__ import print_function
 from collections import namedtuple
+import threading
+import time
 import sys
+import signal
 import os
 import getopt
 import re
 import datetime
 import sqlite3
 
-version = '1.2'
+version = '1.3'
 verbose = 0
 table = 'tsindex'
 dbconn = None
@@ -144,7 +147,8 @@ def main():
     try:
         index_rows = fetch_index_rows(sqlitefile, table, request, filename)
     except Exception as err:
-        print ("Error fetching index rows from '{0}':\n  {1}".format(sqlitefile, err))
+        if str(err) != "interrupted":
+            print ("Error fetching index rows from '{0}':\n  {1}".format(sqlitefile, err))
         sys.exit(2)
 
     if sync:
@@ -635,5 +639,27 @@ def usage():
 
     return
 
+def interrupt_handler(signum, frame):
+    '''Interruption signal handler.
+
+    When triggered, interrupt database connection
+    '''
+
+    global dbconn
+
+    if dbconn:
+        print ("Termination requested (signal {0})".format(signum), file=sys.stderr)
+        dbconn.interrupt()
+
 if __name__ == "__main__":
-    main()
+    signal.signal(signal.SIGINT, interrupt_handler)
+    signal.signal(signal.SIGTERM, interrupt_handler)
+
+    try:
+        mainthread = threading.Thread(target=main)
+        mainthread.start()
+    except Exception as err:
+        print (err)
+
+    while mainthread.isAlive():
+       time.sleep(0.2)

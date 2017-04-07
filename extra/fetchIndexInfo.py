@@ -25,7 +25,7 @@
 #   a) resolve wildcards, allowing the use of '=' operator and thus table index
 #   b) reduce index table search to channels that are known to be present
 #
-# Modified: 2017.095
+# Modified: 2017.097
 # Written by Chad Trabant, IRIS Data Management Center
 
 from __future__ import print_function
@@ -40,7 +40,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.3'
+version = '1.4dev'
 verbose = 0
 table = 'tsindex'
 dbconn = None
@@ -243,6 +243,12 @@ def fetch_index_rows(sqlitefile, table, request, filename):
         raise ValueError(str(err))
 
     cursor = dbconn.cursor()
+
+    # Store temporary table(s) in memory
+    try:
+        cursor.execute("PRAGMA temp_store=MEMORY")
+    except Exception as err:
+        raise ValueError(str(err))
 
     if len(request) > 0:
         index_rows = fetch_index_by_request(cursor, table, request, filename)

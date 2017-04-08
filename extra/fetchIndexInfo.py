@@ -40,10 +40,13 @@ import re
 import datetime
 import sqlite3
 
-version = '1.4dev'
+version = '1.4'
 verbose = 0
 table = 'tsindex'
 dbconn = None
+
+# Assume no time series index section (row) spans more than this many days
+maxsectiondays = 10
 
 def main():
     global verbose
@@ -286,6 +289,7 @@ def fetch_index_by_request(cursor, table, request, filename):
     '''
 
     global verbose
+    global maxsectiondays
     index_rows = []
 
     # Create temporary table and load request
@@ -350,6 +354,15 @@ def fetch_index_by_request(cursor, table, request, filename):
         if verbose >= 2:
             print ("Fetching index entries")
 
+        # The index rows are selected by joining with the request for matching
+        # network, station, location and channel entries with intersecting time ranges.
+        #
+        # The 'maxsectiondays' value is used to further constrain the search.  This is
+        # needed because the endtime cannot be used by the index scan as only a single
+        # field may be compared with inequalities (i.e. greater-than, less-than).
+        # This optimization limits discovery of index section entries (rows) to those
+        # not spanning more than 'maxsectiondays'.
+
         statement = ("SELECT ts.network,ts.station,ts.location,ts.channel,ts.quality, "
                      "  ts.starttime,ts.endtime,ts.samplerate, "
                      "  ts.filename,ts.byteoffset,ts.bytes,ts.hash, "
@@ -357,12 +370,14 @@ def fetch_index_by_request(cursor, table, request, filename):
                      "  ts.format,ts.filemodtime,ts.updated,ts.scanned "
                      "FROM {0} ts, request r "
                      "WHERE "
-                     "  ts.endtime >= r.starttime "
-                     "  AND ts.starttime <= r.endtime "
-                     "  AND ts.network {1} r.network "
+                     "  ts.network {1} r.network "
                      "  AND ts.station {1} r.station "
                      "  AND ts.location {1} r.location "
-                     "  AND ts.channel {1} r.channel ".format(table, "GLOB" if wildcards else "="))
+                     "  AND ts.channel {1} r.channel "
+                     "  AND ts.starttime <= r.endtime "
+                     "  AND ts.starttime >= datetime(r.starttime,'-{2} days') "
+                     "  AND ts.endtime >= r.starttime "
+                     .format(table, "GLOB" if wildcards else "=", maxsectiondays))
 
         if filename:
             statement += ("  AND ts.filename IN ({0}) ".

@@ -81,7 +81,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.071
+ * modified 2017.123
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.3"
+#define VERSION "2.4"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1085,6 +1085,18 @@ SyncSQLite (void)
     {
       ms_log (1, "SQLite database busy timeout set to %lu\n", sqlitebusyto);
     }
+  }
+
+  /* Set LIKE operator to be case-sensitive as it should be with file names.
+   * More importantly, this allows the index on the filename column to be used with our LIKEs. */
+  rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
+                   "PRAGMA case_sensitive_like = ON",
+                   table, table);
+  if (rv != SQLITE_OK)
+  {
+    ms_log (2, "SQLite PRAGMA case_sensitive_like = ON failed: %s\n", (errmsg) ? errmsg : "");
+    sqlite3_free (errmsg);
+    return -1;
   }
 
   /* Create table if it does not exist */

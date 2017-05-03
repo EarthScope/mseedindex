@@ -1,4 +1,12 @@
-2917.071: 2.3
+2017.123: 2.4
+	- Update libmseed to 2.19.4.
+	- Update SQLite to 3.18.0.
+	- Add 'PRAGMA case_sensitive_like = ON' for SQLite synchronization.
+	This means that the LIKE queries are performed case sensitive as
+	the should be for the programs usage with the filename column.
+	Importantly, this allows the LIKE matching to use the column index.
+
+2017.071: 2.3
 	- Add -noup (no updates) option to refrain from searching for and
 	deleting existing rows in the database.
 	- Remove double quotes from keys and values of timeindex field

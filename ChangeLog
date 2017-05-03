@@ -3,7 +3,7 @@
 	- Update SQLite to 3.18.0.
 	- Add 'PRAGMA case_sensitive_like = ON' for SQLite synchronization.
 	This means that the LIKE queries are performed case sensitive as
-	the should be for the programs usage with the filename column.
+	they should be for the program usage with the filename column.
 	Importantly, this allows the LIKE matching to use the column index.
 
 2017.071: 2.3

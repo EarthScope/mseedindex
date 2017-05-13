@@ -11,21 +11,22 @@
 # range.  A selection may be specified using command line options or by
 # specifying a file containing one or more independent selections.
 #
-# If present, an 'all_channel_summary' table that summarizes the time
+# If present, a '<table>_summary' table that summarizes the time
 # extents of each channel in the index is used to optimize the query
-# to the index.  This table can be created with the following statement:
+# to the index.  This table can be created with the following
+# statement (assuming an index table of 'tsindex'):
 #
-# CREATE TABLE all_channel_summary AS
+# CREATE TABLE tsindex_summary AS
 #   SELECT network,station,location,channel,
 #     min(starttime) AS earliest, max(endtime) AS latest, datetime('now') as updt
 #     FROM tsindex
 #     GROUP BY 1,2,3,4;
 #
-# The 'all_channel_summary' table is used to:
+# The summary table is used to:
 #   a) resolve wildcards, allowing the use of '=' operator and thus table index
 #   b) reduce index table search to channels that are known to be present
 #
-# Modified: 2017.097
+# Modified: 2017.132
 # Written by Chad Trabant, IRIS Data Management Center
 
 from __future__ import print_function
@@ -40,7 +41,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.4'
+version = '1.5'
 verbose = 0
 table = 'tsindex'
 dbconn = None
@@ -333,16 +334,17 @@ def fetch_index_by_request(cursor, table, request, filename):
                 wildcards = True
                 break
 
-    # Determine if all_channel_summary table exists
-    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' and name='all_channel_summary'");
-    acs_present = cursor.fetchone()[0]
+    # Determine if summary table exists
+    summary_table = "{0}_summary".format(table)
+    cursor.execute("SELECT count(*) FROM sqlite_master WHERE type='table' and name='%s'" % summary_table);
+    summary_present = cursor.fetchone()[0]
 
     if wildcards:
-        # Resolve wildcards using all_channel_summary if present to:
+        # Resolve wildcards using summary table if present to:
         # a) resolve wildcards, allows use of '=' operator and table index
         # b) reduce index table search to channels that are known included
-        if acs_present:
-            resolve_request(cursor, "request")
+        if summary_present:
+            resolve_request(cursor, summary_table, "request")
             wildcards = False
         # Replace wildcarded starttime and endtime with extreme date-times
         else:
@@ -400,34 +402,35 @@ def fetch_index_by_request(cursor, table, request, filename):
 
     return index_rows
 
-def resolve_request(cursor, requesttable):
-    '''Resolve request table using all_channel_summary
+def resolve_request(cursor, summary_table, request_table):
+    '''Resolve request table using summary
 
     `cursor`: Database cursor
-    `requesttable`: request table to resolve
+    `summary_table`: summary table to resolve
+    `request_table`: request table to resolve
 
     Resolve any '?' and '*' wildcards in the specified request table.
-    The original table is renamed, rebuilt with a join to all_channel_summary
+    The original table is renamed, rebuilt with a join to summary table
     and then original table is then removed.
     '''
 
     global verbose
-    requesttable_orig = requesttable + "_orig"
+    request_table_orig = request_table + "_orig"
 
     if verbose >= 1:
-        print ("Resolving request using all_channel_summary")
+        print ("Resolving request using summary")
 
     # Rename request table
     try:
-        cursor.execute("ALTER TABLE {0} RENAME TO {1}".format(requesttable, requesttable_orig))
+        cursor.execute("ALTER TABLE {0} RENAME TO {1}".format(request_table, request_table_orig))
     except Exception as err:
         raise ValueError(str(err))
 
-    # Create resolved request table by joining with all_channel_summary
+    # Create resolved request table by joining with summary
     try:
         cursor.execute("CREATE TEMPORARY TABLE {0} "
                        "(network TEXT, station TEXT, location TEXT, channel TEXT, "
-                       "starttime TEXT, endtime TEXT) ".format(requesttable))
+                       "starttime TEXT, endtime TEXT) ".format(request_table))
 
         if verbose >= 2:
             print ("Populating resolved request table")
@@ -436,14 +439,15 @@ def resolve_request(cursor, requesttable):
                        "SELECT s.network,s.station,s.location,s.channel,"
                        "CASE WHEN r.starttime='*' THEN s.earliest ELSE r.starttime END,"
                        "CASE WHEN r.endtime='*' THEN s.latest ELSE r.endtime END "
-                       "FROM all_channel_summary s, {1} r "
+                       "FROM {1} s, {2} r "
                        "WHERE "
                        "  (r.starttime='*' OR r.starttime <= s.latest) "
                        "  AND (r.endtime='*' OR r.endtime >= s.earliest) "
                        "  AND (r.network='*' OR s.network GLOB r.network) "
                        "  AND (r.station='*' OR s.station GLOB r.station) "
                        "  AND (r.location='*' OR s.location GLOB r.location) "
-                       "  AND (r.channel='*' OR s.channel GLOB r.channel) ".format(requesttable,requesttable_orig))
+                       "  AND (r.channel='*' OR s.channel GLOB r.channel) ".
+                       format(request_table, summary_table, request_table_orig))
 
     except Exception as err:
         raise ValueError(str(err))
@@ -458,7 +462,7 @@ def resolve_request(cursor, requesttable):
         for row in rows:
             print ("  ", row)
 
-    cursor.execute("DROP TABLE {0}".format(requesttable_orig))
+    cursor.execute("DROP TABLE {0}".format(request_table_orig))
 
     return
 

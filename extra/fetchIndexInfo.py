@@ -291,7 +291,6 @@ def fetch_index_by_request(cursor, table, request, filename):
 
     global verbose
     global maxsectiondays
-    index_rows = []
 
     # Create temporary table and load request
     try:
@@ -393,7 +392,20 @@ def fetch_index_by_request(cursor, table, request, filename):
     except Exception as err:
         raise ValueError(str(err))
 
-    index_rows = cursor.fetchall()
+    # Map tuple to a named tuple for clear referencing
+    NamedRow = namedtuple ('NamedRow',
+                           ['network','station','location','channel','quality',
+                            'starttime','endtime','samplerate','filename',
+                            'byteoffset','bytes','hash','timeindex','timespans',
+                            'timerates','format','filemodtime','updated','scanned'])
+
+    index_rows = []
+    while True:
+        row = cursor.fetchone()
+        if row is None:
+            break
+        #index_rows.append(row)
+        index_rows.append(NamedRow(*row))
 
     # Sort results in application (ORDER BY in SQL triggers bad index usage)
     index_rows.sort()
@@ -507,21 +519,6 @@ def fetch_index_by_filename(cursor, table, filename):
     except Exception as err:
         raise ValueError(str(err))
 
-    index_rows = cursor.fetchall()
-
-    # Sort results in application (ORDER BY in SQL triggers bad index usage)
-    index_rows.sort()
-
-    return index_rows
-
-def print_info(index_rows):
-    '''Print index information given a list of tuples containing:
-
-    (0:network,1:station,2:location,3:channel,4:quality,5:starttime,6:endtime,7:samplerate,
-     8:filename,9:byteoffset,10:bytes,11:hash,12:timeindex,13:timespans,14:timerates,
-     15:format,16:filemodtime,17:updated,18:scanned)
-    '''
-
     # Map tuple to a named tuple for clear referencing
     NamedRow = namedtuple ('NamedRow',
                            ['network','station','location','channel','quality',
@@ -529,8 +526,27 @@ def print_info(index_rows):
                             'byteoffset','bytes','hash','timeindex','timespans',
                             'timerates','format','filemodtime','updated','scanned'])
 
-    for row in index_rows:
-        NRow = NamedRow(*row)
+    index_rows = []
+    while True:
+        row = cursor.fetchone()
+        if row is None:
+            break
+        index_rows.append(NamedRow(*row))
+
+    # Sort results in application (ORDER BY in SQL triggers bad index usage)
+    index_rows.sort()
+
+    return index_rows
+
+def print_info(index_rows):
+    '''Print index information given a list of named tuples containing:
+
+    (0:network,1:station,2:location,3:channel,4:quality,5:starttime,6:endtime,7:samplerate,
+     8:filename,9:byteoffset,10:bytes,11:hash,12:timeindex,13:timespans,14:timerates,
+     15:format,16:filemodtime,17:updated,18:scanned)
+    '''
+
+    for NRow in index_rows:
         print ("{0}:".format(NRow.filename))
         print ("  {0}.{1}.{2}.{3}.{4}, samplerate: {5}, timerange: {6} - {7}".
                format(NRow.network,NRow.station,NRow.location,NRow.channel,NRow.quality,
@@ -571,23 +587,14 @@ def print_info(index_rows):
     return
 
 def print_sync(index_rows):
-    '''Print a SYNC listing given a list of tuples containing:
+    '''Print a SYNC listing given a list of named tuples containing:
 
     (0:network,1:station,2:location,3:channel,4:quality,5:starttime,6:endtime,7:samplerate,
      8:filename,9:byteoffset,10:bytes,11:hash,12:timeindex,13:timespans,14:timerates,
      15:format,16:filemodtime,17:updated,18:scanned)
     '''
 
-    # Map tuple to a named tuple for clear referencing
-    NamedRow = namedtuple ('NamedRow',
-                           ['network','station','location','channel','quality',
-                            'starttime','endtime','samplerate','filename',
-                            'byteoffset','bytes','hash','timeindex','timespans',
-                            'timerates','format','filemodtime','updated','scanned'])
-
-    for row in index_rows:
-        NRow = NamedRow(*row)
-
+    for NRow in index_rows:
         if NRow.timespans:
             # If per-span sample rates are present create a list of them
             rates = None

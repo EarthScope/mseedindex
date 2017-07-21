@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2017/03/12
+.TH MSEEDINDEX 1 2017/07/20
 .SH NAME
 Synchronize Mini-SEED summary and index with database
 
@@ -21,11 +21,13 @@ By default the absolute path to each input file will be resolved and
 stored.
 
 Any existing rows in the database that match the file being
-synchronized will be replaced during synchronization.  This operation
-is done as a database transaction containing all deletions and all
-insertions.  See \fBFILE VERSIONING\fP for a description of how to
-avoid race conditions while simultaneously updating data files and
-extracting data.
+synchronized will be replaced during synchronization, assuming
+the original and replacement files contain data that is within
+1 day of overlapping.  This operation is done as a database
+transaction containing all deletions and all insertions.  See
+\fBFILE VERSIONING\fP for a description of how to avoid race
+conditions while simultaneously updating data files and extracting
+data.
 
 PostgreSQL (version >= 9.1) and SQLite3 are supported as target
 databases.  When using Postgres the specified table is expected to
@@ -59,6 +61,8 @@ file name following a \fB#\fP character, with this pattern:
 If a file name contains this version information \fBmseedindex\fP
 will search for existing rows in the database that match everything
 but the version, e.g. \fBfilename like /path/to/data.file%\fP in SQL.
+The original and replacement file must contain data that is within
+1 day of overlapping.
 
 These features combined mean that a data file can be "replaced" by
 creating a new version of the file and scanning it without ever

@@ -106,7 +106,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.4"
+#define VERSION "2.5"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -666,14 +666,21 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     if (!noupdate)
     {
       /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
-         Include criteria to match an overlapping time range of extents, which can be used by the database. */
+         Include criteria to match an overlapping time range (+- 1 day) of extents, which can be used
+         by the database to optimize the search, for example, by selecting only certain partitions. */
       if (baselength > 0)
-        rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+        rv = asprintf (&filewhere,
+                      "filename LIKE '%.*s%%'"
+                      " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
+                      " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        baselength, flp->filename,
                        (double)MS_HPTIME2EPOCH (filelatest),
                        (double)MS_HPTIME2EPOCH (fileearliest));
       else
-        rv = asprintf (&filewhere, "filename='%s' AND starttime <= to_timestamp(%.6f) AND endtime >= to_timestamp(%.6f)",
+        rv = asprintf (&filewhere,
+                       "filename='%s'"
+                       " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
+                       " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        flp->filename,
                        (double)MS_HPTIME2EPOCH (filelatest),
                        (double)MS_HPTIME2EPOCH (fileearliest));
@@ -1294,12 +1301,19 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
     if (!noupdate)
     {
       /* Search for existing file entries, using a LIKE clause to search when matching versioned files.
-         Include criteria to match an overlapping time range of extents, which can be used by the database. */
+         Include criteria to match an overlapping time range (+- 1 day) of extents, which can be used
+         by the database to optimize the search, for example, by selecting only certain partitions. */
       if (baselength > 0)
-        rv = asprintf (&filewhere, "filename LIKE '%.*s%%' AND starttime <= '%s' AND endtime >= '%s'",
+        rv = asprintf (&filewhere,
+                       "filename LIKE '%.*s%%'"
+                       " AND starttime <= datetime('%s', '+1 day')"
+                       " AND endtime >= datetime('%s', '-1 day')",
                        baselength, flp->filename, latest, earliest);
       else
-        rv = asprintf (&filewhere, "filename='%s' AND starttime <= '%s' AND endtime >= '%s'",
+        rv = asprintf (&filewhere,
+                       "filename='%s'"
+                       " AND starttime <= datetime('%s', '+1 day')"
+                       " AND endtime >= datetime('%s', '-1 day')",
                        flp->filename, latest, earliest);
 
       if (rv <= 0 || !filewhere)
@@ -1997,7 +2011,7 @@ ProcessParam (int argcount, char **argvec)
 
 /***************************************************************************
  * GetOptValue:
- * Return the value to a command line option; checking that the value is 
+ * Return the value to a command line option; checking that the value is
  * itself not an option (starting with '-') and is not past the end of
  * the argument list.
  *

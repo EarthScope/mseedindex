@@ -1,3 +1,9 @@
+2017.201: 2.5
+	- Update logic that identifies and replaces index rows for the same
+	or versioned file names to match the data time coverage +- 1 day.
+	Otherwise, replacement of files containing no overlap data did not
+	work correctly.
+
 2017.123: 2.4
 	- Update libmseed to 2.19.4.
 	- Update SQLite to 3.18.0.

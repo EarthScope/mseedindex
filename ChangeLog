@@ -1,5 +1,9 @@
-2018.059:
+2018.059: 2.7
 	- Update SQLite to 3.22.0.
+	- Update time series index database schema to version 1.1.
+	This schema change includes the addition of a 'version' field,
+	which is unpopulated by this version of the software but will
+	be populated in the future.
 
 2017.283: 2.6
 	- Update libmseed to 2.19.5, with fix for leap second calculation.

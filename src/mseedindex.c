@@ -30,23 +30,24 @@
  *
  * Field Name   Type
  * ------------ ------------
- * id           serial       -- Auto-incrementing
- * network      character varying(2)
- * station      character varying(5)
- * location     character varying(2)
- * channel      character varying(3)
- * quality      character varying(1)
+ * id           bigserial       -- Auto-incrementing
+ * network      character text
+ * station      character text
+ * location     character text
+ * channel      character text
+ * quality      character text
+ * version      smallint,
  * starttime    timestamp with time zone -- Earliest sample time
  * endtime      timestamp with time zone -- Latest sample time
- * samplerate   numeric(10,6)
- * filename     character varying(256)
- * byteoffset   numeric(15,0)
- * bytes        numeric(15,0)
- * hash         character varying(64)
+ * samplerate   numeric
+ * filename     character text
+ * byteoffset   bigint
+ * bytes        bigint
+ * hash         character text
  * timeindex    hstore          -- List of time=>offset pairs using epoch times
  * timespans    numrange[]      -- Array of numrange values containing epoch times
- * timerates    numeric(10,6)[] -- Array of sample rates corresponding to timespans
- * format       character varying(8)  -- NULL means miniSEED
+ * timerates    numeric[]       -- Array of sample rates corresponding to timespans
+ * format       character text  -- NULL means miniSEED
  * filemodtime  timestamp with time zone
  * updated      timestamp with time zone
  * scanned      timestamp with time zone
@@ -60,6 +61,7 @@
  * location     TEXT
  * channel      TEXT
  * quality      TEXT
+ * version      INTEGER
  * starttime    TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS.ssssss
  * endtime      TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS.ssssss
  * samplerate   REAL
@@ -81,7 +83,7 @@
  *
  * Written by Chad Trabant, IRIS Data Management Center.
  *
- * modified 2017.123
+ * modified 2018.059
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -106,7 +108,7 @@
 
 #include "md5.h"
 
-#define VERSION "2.6"
+#define VERSION "2.7"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1114,6 +1116,7 @@ SyncSQLite (void)
                    "location TEXT,"
                    "channel TEXT,"
                    "quality TEXT,"
+                   "version INTEGER,"
                    "starttime TEXT,"
                    "endtime TEXT,"
                    "samplerate REAL,"

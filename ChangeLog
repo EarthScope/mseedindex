@@ -1,3 +1,6 @@
+2018.163: 2.7.1
+	- Add Windows compatibility bits and Makefile.win (Nmake) files.
+
 2018.059: 2.7
 	- Update SQLite to 3.22.0.
 	- Update time series index database schema to version 1.1.

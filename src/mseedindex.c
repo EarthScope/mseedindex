@@ -90,7 +90,6 @@
 #include <ctype.h>
 #include <errno.h>
 #include <limits.h>
-#include <regex.h>
 #include <stdarg.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -106,9 +105,14 @@
 
 #include <libmseed.h>
 
+#if defined(LMP_WIN)
+#define asprintf internal_asprintf
+#define vasprintf internal_vasprintf
+#endif
+
 #include "md5.h"
 
-#define VERSION "2.7"
+#define VERSION "2.7.1"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -2159,7 +2163,14 @@ static int
 ResolveFilePaths (void)
 {
   struct filelink *filelp;
+
+  /* Portability, Windows versus everything else */
+#if defined(LMP_WIN)
+  char abspath[_MAX_PATH];
+#define realpath(relpath, abspath) _fullpath(abspath, relpath, _MAX_PATH)
+#else
   char abspath[PATH_MAX];
+#endif
 
   filelp = filelist;
   while (filelp)

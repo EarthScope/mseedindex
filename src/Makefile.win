@@ -1,0 +1,23 @@
+#
+# Nmake file - Windows version
+# Use 'nmake -f Makefile.win'
+
+NODEBUG=1
+
+INCS = /I..\libmseed /I..\sqlite
+OPTS = -D_CRT_SECURE_NO_WARNINGS -DWITHOUTPOSTGRESQL
+LIBS = ..\libmseed\libmseed.lib
+
+BIN = ..\mseedindex.exe
+
+all: $(BIN)
+
+$(BIN):	mseedindex.obj md5.obj asprintf.obj ..\sqlite\sqlite3.obj
+	link.exe /nologo /out:$(BIN) $(LIBS) mseedindex.obj md5.obj asprintf.obj sqlite3.obj
+
+.c.obj:
+        $(CC) /nologo $(CFLAGS) $(INCS) $(OPTS) /c $<
+
+# Clean-up directives
+clean:
+	-del a.out core *.o *.obj *% *~ $(BIN)

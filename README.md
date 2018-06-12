@@ -39,6 +39,10 @@ $ WITHOUTPOSTGRESQL=1 make
 For further installation simply copy the resulting binary and man page
 (in the 'doc' directory) to appropriate system directories.
 
+In the Win32 environment the Makefile.win can be used with the nmake
+build tool included with Visual Studio.  PostgreSQL support is turned
+off by default in the Windows build procedure.
+
 ## Licensing 
 
 Copyright (C) 2016 Chad Trabant, IRIS Data Management Center

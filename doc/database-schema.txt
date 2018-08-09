@@ -1,25 +1,27 @@
--- Time series index schema
--- Version 1.0
+-- https://github.com/iris-edu/mseedindex/wiki/Database-Schema
+-- Time series index schema for Postgres
+-- Version 1.1
 
 CREATE TABLE tsindex
 (
-  id serial,
-  network character varying(2) NOT NULL,
-  station character varying(5) NOT NULL,
-  location character varying(2) NOT NULL,
-  channel character varying(3) NOT NULL,
-  quality character varying(1) NOT NULL,
+  id bigserial,
+  network character text NOT NULL,
+  station character text NOT NULL,
+  location character text NOT NULL,
+  channel character text NOT NULL,
+  quality character text NOT NULL,
+  version smallint,
   starttime timestamp with time zone NOT NULL,
   endtime timestamp with time zone NOT NULL,
-  samplerate numeric(10,6) NOT NULL,
-  filename character varying(256) NOT NULL,
-  byteoffset numeric(15,0) NOT NULL,
-  bytes numeric(15,0) NOT NULL,
-  hash character varying(64),
+  samplerate numeric NOT NULL,
+  filename character text NOT NULL,
+  byteoffset bigint NOT NULL,
+  bytes bigint NOT NULL,
+  hash character text,
   timeindex hstore,
   timespans numrange[],
-  timerates numeric(10,6)[],
-  format character varying(8),
+  timerates numeric[],
+  format character text,
   filemodtime timestamp with time zone NOT NULL,
   updated timestamp with time zone NOT NULL,
   scanned timestamp with time zone NOT NULL

@@ -24,7 +24,7 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p >Data files should be scanned or synchronized when they are in-place. By default the absolute path to each input file will be resolved and stored.</p>
 
-<p >Any existing rows in the database that match the file being synchronized will be replaced during synchronization.  This operation is done as a database transaction containing all deletions and all insertions.  See <b>FILE VERSIONING</b> for a description of how to avoid race conditions while simultaneously updating data files and extracting data.</p>
+<p >Any existing rows in the database that match the file being synchronized will be replaced during synchronization, assuming the original and replacement files contain data that is within 1 day of overlapping.  This operation is done as a database transaction containing all deletions and all insertions.  See <b>FILE VERSIONING</b> for a description of how to avoid race conditions while simultaneously updating data files and extracting data.</p>
 
 <p >PostgreSQL (version >= 9.1) and SQLite3 are supported as target databases.  When using Postgres the specified table is expected to exist.  When using SQLite both the database file and table will be created as needed, along with some indexes on common fields.</p>
 
@@ -44,7 +44,7 @@ mseedindex [options] file1 [file2 file3 ...]
 /path/to/data.file#VERSION
 </pre>
 
-<p >If a file name contains this version information <b>mseedindex</b> will search for existing rows in the database that match everything but the version, e.g. <b>filename like /path/to/data.file%</b> in SQL.</p>
+<p >If a file name contains this version information <b>mseedindex</b> will search for existing rows in the database that match everything but the version, e.g. <b>filename like /path/to/data.file%</b> in SQL. The original and replacement file must contain data that is within 1 day of overlapping.</p>
 
 <p >These features combined mean that a data file can be "replaced" by creating a new version of the file and scanning it without ever interrupting concurrent data extraction.  After replacement, another process can later remove the older version of the file.</p>
 
@@ -120,7 +120,7 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <b>-sqlitebusyto </b><i>milliseconds</i>
 
-<p style="padding-left: 30px;">Set the SQLite busy timeout value in milliseconds, default is 10 seconds.  This is the amount of time to wait for a database lock and may need to be tuned in special scenarios where the database is particularly busy, such highly concurrent usage.</p>
+<p style="padding-left: 30px;">Set the SQLite busy timeout value in milliseconds, default is 10 seconds.  This is the amount of time to wait for a database lock and may need to be tuned in special scenarios where the database is particularly busy, such as highly concurrent usage.</p>
 
 ## <a id='input-list-file'>Input List File</a>
 
@@ -156,4 +156,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2017/03/12)
+(man page 2017/07/20)

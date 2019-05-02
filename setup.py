@@ -5,6 +5,7 @@ from setuptools.command.develop import develop
 from setuptools.command.sdist import sdist
 from io import open
 from tempfile import gettempdir
+import pkg_resources
 import subprocess
 import os
 import sys
@@ -27,6 +28,7 @@ except ImportError:
 
 dist_options = dict(
     name=module_name,
+    version = pkg_resources.get_distribution(module_name).version,
     author="IRIS",
     author_email="software-owner@iris.washington.edu",
     description="Python hook for installing mseedindex",

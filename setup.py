@@ -108,7 +108,7 @@ setup(
     description="Python hook for installing mseedindex",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/iris-edu/mseedindexpypy",
+    url="https://github.com/iris-edu/mseedindex",
     packages=find_packages(),
     python_requires='>=2.7, <4',
     classifiers=[

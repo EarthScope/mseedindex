@@ -1,6 +1,8 @@
+from setuptools.dist import Distribution
 from setuptools import setup, find_packages
 from setuptools.command.install import install
 from setuptools.command.develop import develop
+from setuptools.command.sdist import sdist
 from io import open
 from tempfile import gettempdir
 import subprocess
@@ -13,21 +15,40 @@ import re
 
 module_name = 'mseedindex'
 
-here = os.path.abspath(os.path.dirname(__file__))
-
-with open(os.path.join(here, "README.md"), encoding='utf-8') as fh:
+with open(os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                       "README.md"), encoding='utf-8') as fh:
     long_description = fh.read()
-
-with open(os.path.join(here, "src/mseedindex.c"), encoding='utf-8') as fh:
-    # extract mseedindex.c version from the source code
-    result = re.search('#define VERSION "(.*)"', fh.read())
-    version = result.group(1)
 
 # python 2 / 3 compatibility
 try:
     from urllib.request import urlopen
 except ImportError:
     from urllib2 import urlopen
+
+dist_options = dict(
+    name=module_name,
+    version="0.0.0",  # automatically updated to mseeedindex.c version by sdist
+    author="IRIS",
+    author_email="software-owner@iris.washington.edu",
+    description="Python hook for installing mseedindex",
+    long_description=long_description,
+    long_description_content_type="text/markdown",
+    url="https://github.com/iris-edu/mseedindexpypy",
+    packages=find_packages(),
+    python_requires='>=2.7, <4',
+    classifiers=[
+        "Development Status :: 5 - Production/Stable",
+        "Environment :: Console",
+        "Intended Audience :: Science/Research",
+        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
+        "Operating System :: Unix",
+        "Operating System :: MacOS",
+        "Programming Language :: Python :: 2.7",
+        "Programming Language :: Python :: 3.5",
+        "Programming Language :: Python :: 3.6",
+        "Programming Language :: Python :: 3.7",
+    ]
+)
 
 
 class InstallBase():
@@ -100,29 +121,28 @@ class InstallMSeedIndex(install, InstallBase):
         install.run(self)
 
 
+class SDistMSeedIndex(sdist):
+
+    def get_version(self):
+        with open(os.path.join(os.path.abspath(os.path.dirname(__file__)),
+                               "src/mseedindex.c"), encoding='utf-8') as fh:
+            # extract mseedindex.c version from the source code
+            result = re.search('#define VERSION "(.*)"', fh.read())
+            version = result.group(1)
+            return version
+
+    def run(self):
+        dist_options["version"] = self.get_version()
+        dist = Distribution(dist_options)
+        dist.script_name = 'setup.py'
+        cmd = sdist(dist)
+        cmd.ensure_finalized()
+        cmd.run()
+
+
 setup(
-    name=module_name,
-    version=version,
-    author="IRIS",
-    author_email="software-owner@iris.washington.edu",
-    description="Python hook for installing mseedindex",
-    long_description=long_description,
-    long_description_content_type="text/markdown",
-    url="https://github.com/iris-edu/mseedindex",
-    packages=find_packages(),
-    python_requires='>=2.7, <4',
-    classifiers=[
-        "Development Status :: 5 - Production/Stable",
-        "Environment :: Console",
-        "Intended Audience :: Science/Research",
-        "License :: OSI Approved :: GNU General Public License v3 (GPLv3)",
-        "Operating System :: Unix",
-        "Operating System :: MacOS",
-        "Programming Language :: Python :: 2.7",
-        "Programming Language :: Python :: 3.5",
-        "Programming Language :: Python :: 3.6",
-        "Programming Language :: Python :: 3.7",
-    ],
     cmdclass={'install': InstallMSeedIndex,
-              'develop': DevelopMSeedIndex},
+              'develop': DevelopMSeedIndex,
+              'sdist': SDistMSeedIndex},
+    **dist_options
 )

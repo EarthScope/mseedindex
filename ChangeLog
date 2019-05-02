@@ -1,3 +1,6 @@
+2019.122:
+	- Add setup.py to allow pushing a installer package to PyPi.
+
 2018.163: 2.7.1
 	- Add Windows compatibility bits and Makefile.win (Nmake) files.
 

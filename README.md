@@ -1,6 +1,6 @@
-# mseedindex - Synchronize Mini-SEED with database
+# mseedindex - Synchronize miniSEED with database
 
-This program reads Mini-SEED files, creates an index of the available
+This program reads miniSEED files, creates an index of the available
 data and stores this information into a database.  The index includes
 details such as identifers, time ranges, file names, location within files,
 and additional details.  The database can be either

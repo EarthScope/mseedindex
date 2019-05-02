@@ -27,7 +27,6 @@ except ImportError:
 
 dist_options = dict(
     name=module_name,
-    version="0.0.0",  # automatically updated to mseeedindex.c version by sdist
     author="IRIS",
     author_email="software-owner@iris.washington.edu",
     description="Python hook for installing mseedindex",

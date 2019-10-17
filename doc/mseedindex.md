@@ -106,6 +106,10 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">Specify the database host name, default: 5432.</p>
 
+<b>-dbname </b><i>name</i>
+
+<p style="padding-left: 30px;">Specify database name or full connection info, currently: timeseries</p>
+
 <b>-dbuser </b><i>username</i>
 
 <p style="padding-left: 30px;">Specify the database user name, default: timeseries.</p>
@@ -156,4 +160,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2017/07/20)
+(man page 2019/10/17)

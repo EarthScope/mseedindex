@@ -106,6 +106,10 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">Specify the database host name, default: 5432.</p>
 
+<b>-dbname </b><i>database name</i>
+
+<p style="padding-left: 30px;">Specify the database name, default: timeseries.</p>
+
 <b>-dbuser </b><i>username</i>
 
 <p style="padding-left: 30px;">Specify the database user name, default: timeseries.</p>

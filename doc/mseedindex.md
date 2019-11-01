@@ -108,7 +108,7 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <b>-dbname </b><i>name</i>
 
-<p style="padding-left: 30px;">Specify database name or full connection info, currently: timeseries</p>
+<p style="padding-left: 30px;">Specify database name or full connection info, default: timeseries</p>
 
 <b>-dbuser </b><i>username</i>
 
@@ -144,7 +144,7 @@ data/day3.mseed
 
 ## <a id='leap-second-list-file'>Leap Second List File</a>
 
-<p >If the environment variable LIBMSEED_LEAPSECOND_FILE is set it is expected to indicate a file containing a list of leap seconds as published by NIST and IETF, usually available here: http://www.ietf.org/timezones/data/leap-seconds.list</p>
+<p >If the environment variable LIBMSEED_LEAPSECOND_FILE is set it is expected to indicate a file containing a list of leap seconds as published by NIST and IETF, usually available here: https://www.ietf.org/timezones/data/leap-seconds.list</p>
 
 <p >Specifying this file is highly recommended.</p>
 

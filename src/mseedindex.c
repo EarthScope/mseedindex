@@ -1,7 +1,7 @@
 /***************************************************************************
- * mseedindex.c - Synchronize Mini-SEED with database schema
+ * mseedindex.c - Synchronize miniSEED with database schema
  *
- * Opens user specified file(s), parses the Mini-SEED records and
+ * Opens user specified file(s), parses the miniSEED records and
  * synchronizes a time series summary with a database.
  *
  * PostgreSQL and SQLite3 are supported as target databases.  When
@@ -82,8 +82,6 @@
  * code will be 0.
  *
  * Written by Chad Trabant, IRIS Data Management Center.
- *
- * modified 2018.059
  ***************************************************************************/
 
 #define _GNU_SOURCE
@@ -112,12 +110,10 @@
 
 #include "md5.h"
 
-#define VERSION "2.7.1"
+#define VERSION "3.0.0DEV"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
-static double timetol = -1.0;     /* Time tolerance for continuous traces */
-static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces */
 static char keeppath = 0;         /* Use originally specified path, do not resolve absolute */
 static flag nosync = 0;           /* Control synchronization with database, 1 = no database */
 static flag noupdate = 0;         /* Control replacement of rows in database, 1 = no updating */
@@ -136,7 +132,7 @@ static flag dbconntrace = 0; /* Trace database interactions, for debugging */
 
 struct timeindex
 {
-  hptime_t time;
+  nstime_t time;
   int64_t byteoffset;
   struct timeindex *next;
 };
@@ -145,14 +141,15 @@ struct sectiondetails
 {
   int64_t startoffset;
   int64_t endoffset;
-  hptime_t earliest;
-  hptime_t latest;
+  nstime_t earliest;
+  nstime_t latest;
   time_t updated;
   md5_state_t digeststate;
   char digeststr[33];
+  double nomsamprate;
   int timeorderrecords;
   struct timeindex *tindex;
-  MSTraceList *spans;
+  MS3TraceList *spans;
 };
 
 struct filelink
@@ -160,14 +157,20 @@ struct filelink
   char *filename;
   time_t filemodtime;
   time_t scantime;
-  MSTraceGroup *mstg;
+  MS3TraceList *mstl;
   struct filelink *next;
 };
 
 struct filelink *filelist = 0;
 struct filelink *filelisttail = 0;
 
-struct timeindex *AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset);
+static double timetol = -1.0;     /* Time tolerance for continuous traces */
+static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces */
+static MS3Tolerance tolerance = { .time = NULL, .samprate = NULL };
+double timetol_callback (MS3Record *msr) { return timetol; }
+double samprate_callback (MS3Record *msr) { return sampratetol; }
+
+struct timeindex *AddTimeIndex (struct timeindex **tindex, nstime_t time, int64_t byteoffset);
 #ifndef WITHOUTPOSTGRESQL
 static int SyncPostgres (void);
 static int SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp);
@@ -178,7 +181,7 @@ static int SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp);
 static int SQLiteExec (sqlite3 *dbconn, int (*callback) (void *, int, char **, char **),
                        void *callbackdata, char **errmsg, const char *format, ...);
 static int SQLitePrepare (sqlite3 *dbconn, sqlite3_stmt **statement, const char *format, ...);
-void Local_mst_printtracelist (MSTraceGroup *mstg, flag timeformat);
+static void local_mstl_printtracelist (MS3TraceList *mstl, flag timeformat);
 static int ProcessParam (int argcount, char **argvec);
 static char *GetOptValue (int argcount, char **argvec, int argopt);
 static int AddFile (char *filename);
@@ -192,12 +195,13 @@ main (int argc, char **argv)
 {
   struct sectiondetails *sd = NULL;
   struct filelink *flp = NULL;
-  MSRecord *msr = NULL;
-  MSTrace *mst = NULL;
-  MSTrace *cmst = NULL;
-  hptime_t endtime = HPTERROR;
-  hptime_t nextindex = HPTERROR;
-  hptime_t prevstarttime = HPTERROR;
+  MS3Record *msr = NULL;
+  MS3TraceID *id = NULL;
+  MS3TraceID *secid = NULL;
+  uint32_t flags = 0;
+  nstime_t endtime = NSTERROR;
+  nstime_t nextindex = NSTERROR;
+  nstime_t prevstarttime = NSTERROR;
   char *leapsecondfile = NULL;
   int retcode = MS_NOERROR;
   struct stat st;
@@ -226,8 +230,12 @@ main (int argc, char **argv)
   else
   {
     ms_log (1, "Warning: No leap second file specified with LIBMSEED_LEAPSECOND_FILE\n");
-    ms_log (1, "  This is highly recommended, see man page for details.\n");
+    ms_log (1, "  This is highly recommended, see usage manual for details.\n");
   }
+
+  /* Enable parsing of byte range from files, and skipping of non-miniSEED */
+  flags |= MSF_PNAMERANGE;
+  flags |= MSF_SKIPNOTDATA;
 
   /* Read files and accumulate indexing details */
   flp = filelist;
@@ -236,9 +244,9 @@ main (int argc, char **argv)
     if (verbose >= 1)
       ms_log (1, "Processing: %s\n", flp->filename);
 
-    if ((flp->mstg = mst_initgroup (flp->mstg)) == NULL)
+    if ((flp->mstl = mstl3_init (flp->mstl)) == NULL)
     {
-      ms_log (2, "Could not allocate MSTraceGroup, out of memory?\n");
+      ms_log (2, "Could not allocate trace list, out of memory?\n");
       exit (1);
     }
 
@@ -250,31 +258,27 @@ main (int argc, char **argv)
 
     flp->filemodtime = st.st_mtime;
     flp->scantime = time (NULL);
-    cmst = NULL;
+    secid = NULL;
     prevfilepos = 0;
-    prevstarttime = HPTERROR;
+    prevstarttime = NSTERROR;
 
     /* Read records from the input file */
-    while ((retcode = ms_readmsr (&msr, flp->filename, -1, &filepos,
-                                  NULL, 1, 0, verbose - 2)) == MS_NOERROR)
+    while ((retcode = ms3_readmsr (&msr, flp->filename, &filepos, NULL,
+                                   flags, verbose - 2)) == MS_NOERROR)
     {
-      mst = NULL;
-      endtime = msr_endtime (msr);
+      id = NULL;
+      endtime = msr3_endtime (msr);
 
-      /* Test if this record matches the current MSTrace */
-      if (cmst)
+      /* Test if this record matches the current ID */
+      if (secid && strcmp (secid->sid, msr->sid) == 0)
       {
-        mst = mst_findmatch (cmst, msr->dataquality, msr->network, msr->station,
-                             msr->location, msr->channel);
+        id = secid;
       }
-
-      /* Update details of current MSTrace if current record matches and is next in the file */
-      if (mst == cmst && filepos == (prevfilepos + msr->reclen))
+//TODO,do we need id?
+      /* Update details of current section if current record matches and is next in the file */
+      if (id == secid && filepos == (prevfilepos + msr->reclen))
       {
-        if (msr->samplecnt > 0)
-          mst_addmsr (cmst, msr, 1);
-
-        sd = (struct sectiondetails *)cmst->prvtptr;
+        sd = (struct sectiondetails *)secid->prvtptr;
         sd->endoffset = filepos + msr->reclen - 1;
 
         /* Maintain earliest and latest time stamps */
@@ -297,37 +301,49 @@ main (int argc, char **argv)
           }
 
           while (nextindex < endtime)
-            nextindex += MS_EPOCH2HPTIME (3600);
+            nextindex += MS_EPOCH2NSTIME (3600);
         }
 
         /* Add coverage to span list if sample rate is non-zero */
         if (msr->samprate)
         {
-          if (!mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol))
+          if (!mstl3_addmsr (sd->spans, msr, 1, 1, flags, &tolerance))
           {
-            ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+            ms_log (2, "Could not add record to span list, out of memory?\n");
             exit (1);
           }
         }
 
         md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
       }
-      /* Otherwise create a new MSTrace */
+      /* Otherwise create a new section ID */
       else
       {
-        /* Create & populate new current MSTrace and add it to the file MSTraceGroup */
-        cmst = mst_init (NULL);
-        mst_addtracetogroup (flp->mstg, cmst);
+        /* Create & populate new ID and add it to the list */
+        if (!(secid = calloc (1, sizeof (MS3TraceID))))
+        {
+          ms_log (2, "Cannot allocate new ID\n");
+          return 1;
+        }
 
-        strncpy (cmst->network, msr->network, sizeof (cmst->network));
-        strncpy (cmst->station, msr->station, sizeof (cmst->station));
-        strncpy (cmst->location, msr->location, sizeof (cmst->location));
-        strncpy (cmst->channel, msr->channel, sizeof (cmst->channel));
-        cmst->dataquality = msr->dataquality;
-        cmst->starttime = msr->starttime;
-        cmst->endtime = endtime;
-        cmst->samprate = msr->samprate;
-        cmst->samplecnt = msr->samplecnt;
+        /* Add new ID to end of list */
+        if (flp->mstl->last)
+        {
+          flp->mstl->traces = secid;
+          flp->mstl->last = secid;
+        }
+        else
+        {
+          flp->mstl->last->next = secid;
+        }
+
+        flp->mstl->numtraces++;
+
+        strncpy (secid->sid, msr->sid, sizeof (secid->sid));
+        secid->pubversion = msr->pubversion;
+        secid->earliest = msr->starttime;
+        secid->latest = endtime;
+        //TODO, needed?  secid->samprate = msr->samprate;
 
         if (!(sd = calloc (1, sizeof (struct sectiondetails))))
         {
@@ -335,11 +351,12 @@ main (int argc, char **argv)
           return 1;
         }
 
-        cmst->prvtptr = sd;
+        secid->prvtptr = sd;
 
         sd->startoffset = filepos;
         sd->endoffset = filepos + msr->reclen - 1;
         sd->earliest = msr->starttime;
+        CHAD
         sd->latest = endtime;
         sd->updated = flp->filemodtime;
         sd->timeorderrecords = 1; /* By default records are assumed to be in order */
@@ -351,23 +368,23 @@ main (int argc, char **argv)
           exit (1);
         }
 
-        nextindex = cmst->starttime + MS_EPOCH2HPTIME (3600);
+        nextindex = secid->earliest + MS_EPOCH2NSTIME (3600);
         while (nextindex < endtime)
-          nextindex += MS_EPOCH2HPTIME (3600);
+          nextindex += MS_EPOCH2NSTIME (3600);
 
-        /* Initialize MSTraceList time span list and populate */
-        if ((sd->spans = mstl_init (NULL)) == NULL)
+        /* Initialize trace list time span list and populate */
+        if ((sd->spans = mstl3_init (NULL)) == NULL)
         {
-          ms_log (2, "Could not allocate MSTraceList, out of memory?\n");
+          ms_log (2, "Could not allocate trace list, out of memory?\n");
           exit (1);
         }
 
         /* Add coverage to span list if sample rate is non-zero */
         if (msr->samprate)
         {
-          if (!mstl_addmsr (sd->spans, msr, 1, 1, timetol, sampratetol))
+          if (!mstl3_addmsr (sd->spans, msr, 1, 1, flags, &tolerance))
           {
-            ms_log (2, "Could not add MSRecord to span list, out of memory?\n");
+            ms_log (2, "Could not add record to span list, out of memory?\n");
             exit (1);
           }
         }
@@ -386,18 +403,18 @@ main (int argc, char **argv)
     if (retcode != MS_ENDOFFILE)
     {
       ms_log (2, "Cannot read %s: %s\n", flp->filename, ms_errorstr (retcode));
-      ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
+      ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
       exit (1);
     }
 
     /* Make sure everything is cleaned up */
-    ms_readmsr (&msr, NULL, 0, NULL, NULL, 0, 0, 0);
+    ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
 
     /* Print sections for verbose output */
     if (verbose >= 2)
     {
       ms_log (1, "Section list to synchronize for %s\n", flp->filename);
-      Local_mst_printtracelist (flp->mstg, 1);
+      local_mstl_printtracelist (flp->mstl, 1);
     }
 
     flp = flp->next;
@@ -432,7 +449,7 @@ main (int argc, char **argv)
  * Returns a pointer to the new timeindex on success and NULL on error.
  ***************************************************************************/
 struct timeindex *
-AddTimeIndex (struct timeindex **tindex, hptime_t time, int64_t byteoffset)
+AddTimeIndex (struct timeindex **tindex, nstime_t time, int64_t byteoffset)
 {
   struct timeindex *findex;
   struct timeindex *nindex;
@@ -613,8 +630,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   double version = -1.0;
   md5_byte_t digest[16];
 
-  hptime_t fileearliest = HPTERROR;
-  hptime_t filelatest = HPTERROR;
+  nstime_t fileearliest = NSTERROR;
+  nstime_t filelatest = NSTERROR;
 
   if (!flp)
     return -1;
@@ -651,16 +668,16 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
         sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
 
       /* Determine earliest and latest times for the file */
-      if (fileearliest == HPTERROR || fileearliest > sd->earliest)
+      if (fileearliest == NSTERROR || fileearliest > sd->earliest)
         fileearliest = sd->earliest;
-      if (filelatest == HPTERROR || filelatest < sd->latest)
+      if (filelatest == NSTERROR || filelatest < sd->latest)
         filelatest = sd->latest;
     }
 
     mst = mst->next;
   }
 
-  if (fileearliest == HPTERROR || filelatest == HPTERROR)
+  if (fileearliest == NSTERROR || filelatest == NSTERROR)
   {
     ms_log (2, "No time extents found for %s\n", flp->filename);
     return -1;
@@ -680,16 +697,16 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
                       " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
                       " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        baselength, flp->filename,
-                       (double)MS_HPTIME2EPOCH (filelatest),
-                       (double)MS_HPTIME2EPOCH (fileearliest));
+                       (double)MS_NSTIME2EPOCH (filelatest),
+                       (double)MS_NSTIME2EPOCH (fileearliest));
       else
         rv = asprintf (&filewhere,
                        "filename='%s'"
                        " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
                        " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        flp->filename,
-                       (double)MS_HPTIME2EPOCH (filelatest),
-                       (double)MS_HPTIME2EPOCH (fileearliest));
+                       (double)MS_NSTIME2EPOCH (filelatest),
+                       (double)MS_NSTIME2EPOCH (fileearliest));
 
       if (rv <= 0 || !filewhere)
       {
@@ -793,8 +810,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     bytecount = sd->endoffset - sd->startoffset + 1;
 
     /* Create earliest and latest epoch time strings, rounding to microseconds */
-    snprintf (earliest, sizeof (earliest), "%.6f", (double)MS_HPTIME2EPOCH (sd->earliest));
-    snprintf (latest, sizeof (latest), "%.6f", (double)MS_HPTIME2EPOCH (sd->latest));
+    snprintf (earliest, sizeof (earliest), "%.6f", (double)MS_NSTIME2EPOCH (sd->earliest));
+    snprintf (latest, sizeof (latest), "%.6f", (double)MS_NSTIME2EPOCH (sd->latest));
 
     /* If time index includes the earliest data first create the time index key-value hstore:
      * 'time1=>offset1,time2=>offset2,time3=>offset3,...,latest=>[0|1]'
@@ -807,7 +824,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       while (tindex)
       {
         snprintf (tmpstring, sizeof (tmpstring), "\"%.6f\"=>\"%lld\"",
-                  (double)MS_HPTIME2EPOCH (tindex->time),
+                  (double)MS_NSTIME2EPOCH (tindex->time),
                   (long long int)tindex->byteoffset);
 
         if (AddToString (&indexstr, tmpstring, ",", 0, 8388608))
@@ -848,8 +865,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     /* Create the time spans and rates arrays for spans */
     if (sd->spans)
     {
-      MSTraceID *id;
-      MSTraceSeg *seg;
+      MS3TraceID *id;
+      MS3TraceSeg *seg;
       char *spansstr = NULL;
       char *ratesstr = NULL;
       int ratemismatches = 0;
@@ -871,8 +888,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
         {
           /* Create number range value entry in array, rounding epoch times to microseconds */
           snprintf (tmpstring, sizeof (tmpstring), "numrange(%.6f,%.6f,'[]')",
-                    (double)MS_HPTIME2EPOCH (seg->starttime),
-                    (double)MS_HPTIME2EPOCH (seg->endtime));
+                    (double)MS_NSTIME2EPOCH (seg->starttime),
+                    (double)MS_NSTIME2EPOCH (seg->endtime));
 
           if (AddToString (&spansstr, tmpstring, ",", 0, 8388608))
           {
@@ -1219,7 +1236,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
 {
   sqlite3_stmt *statement = NULL;
   struct sectiondetails *sd;
-  MSTrace *mst = NULL;
+  MSTraceID *secid = NULL;
   int64_t bytecount;
   char earliest[64];
   char latest[64];
@@ -1241,8 +1258,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   double version = -1.0;
   md5_byte_t digest[16];
 
-  hptime_t fileearliest = HPTERROR;
-  hptime_t filelatest = HPTERROR;
+  nstime_t fileearliest = NSTERROR;
+  nstime_t filelatest = NSTERROR;
 
   if (!flp)
     return -1;
@@ -1268,10 +1285,10 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   }
 
   /* Loop through trace list, create MD5 digest strings and track file extents */
-  mst = flp->mstg->traces;
-  while (mst)
+  secid = flp->mstl->traces;
+  while (secid)
   {
-    if ((sd = (struct sectiondetails *)mst->prvtptr))
+    if ((sd = (struct sectiondetails *)secid->prvtptr))
     {
       /* Calculate MD5 digest and create string representation */
       md5_finish (&(sd->digeststate), digest);
@@ -1279,16 +1296,16 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
         sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
 
       /* Determine earliest and latest times for the file */
-      if (fileearliest == HPTERROR || fileearliest > sd->earliest)
+      if (fileearliest == NSTERROR || fileearliest > sd->earliest)
         fileearliest = sd->earliest;
-      if (filelatest == HPTERROR || filelatest < sd->latest)
+      if (filelatest == NSTERROR || filelatest < sd->latest)
         filelatest = sd->latest;
     }
 
-    mst = mst->next;
+    secid = secid->next;
   }
 
-  if (fileearliest == HPTERROR || filelatest == HPTERROR)
+  if (fileearliest == NSTERROR || filelatest == NSTERROR)
   {
     ms_log (2, "No time extents found for %s\n", flp->filename);
     return -1;
@@ -1298,8 +1315,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   if (dbconn)
   {
     /* Create time strings for earliest and latest times for the file */
-    if (!ms_hptime2isotimestr (fileearliest, earliest, 1) ||
-        !ms_hptime2isotimestr (filelatest, latest, 1))
+    if (!ms_nstime2timestr (fileearliest, earliest, ISOMONTHDAY, NANO_MICRO_NONE) ||
+        !ms_nstime2timestr (filelatest, latest, ISOMONTHDAY, NANO_MICRO_NONE))
     {
       ms_log (2, "Cannot create earliest/latest time strings for %s\n", flp->filename);
       return -1;
@@ -1355,35 +1372,47 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
         /* Fields: 0=network,1=station,2=location,3=channel,4=quality,5=hash,6=updated */
         for (idx = 0; idx < matchcount; idx++)
         {
-          mst = flp->mstg->traces;
-          while (mst)
+          secid = flp->mstl->traces;
+          while (secid)
           {
-            if ((sd = (struct sectiondetails *)mst->prvtptr))
+            if ((sd = (struct sectiondetails *)secid->prvtptr))
             {
               const unsigned char *qp = sqlite3_column_text (statement, 4);
-              hptime_t hpupdated;
+              nstime_t hpupdated;
+              char network[11];
+              char station[11];
+              char location[11];
+              char channel[11];
+
+              /* Parse NSLC components from source ID */
+              if (ms_sid2nslc (secid->sid, network, station, location, channel))
+              {
+                if (filewhere)
+                  free (filewhere);
+                return -1;
+              }
 
               if (!strcmp (sd->digeststr, (char *)sqlite3_column_text (statement, 5)))
                 if (mst->dataquality == *qp)
-                  if (!strcmp (mst->channel, (char *)sqlite3_column_text (statement, 3)))
-                    if (!strcmp (mst->location, (char *)sqlite3_column_text (statement, 2)))
-                      if (!strcmp (mst->station, (char *)sqlite3_column_text (statement, 1)))
-                        if (!strcmp (mst->network, (char *)sqlite3_column_text (statement, 0)))
+                  if (!strcmp (channel, (char *)sqlite3_column_text (statement, 3)))
+                    if (!strcmp (location, (char *)sqlite3_column_text (statement, 2)))
+                      if (!strcmp (station, (char *)sqlite3_column_text (statement, 1)))
+                        if (!strcmp (network, (char *)sqlite3_column_text (statement, 0)))
                         {
-                          hpupdated = ms_timestr2hptime ((char *)sqlite3_column_text (statement, 6));
+                          hpupdated = ms_timestr2nstime ((char *)sqlite3_column_text (statement, 6));
 
-                          if (hpupdated == HPTERROR)
+                          if (hpupdated == NSTERROR)
                           {
                             ms_log (1, "Warning: could not convert 'updated' time value: '%s'\n",
                                     sqlite3_column_text (statement, 6));
                           }
 
                           /* Convert to time_t with simple rounding */
-                          sd->updated = (double)MS_HPTIME2EPOCH (hpupdated) + 0.5;
+                          sd->updated = (double)MS_NSTIME2EPOCH (hpupdated) + 0.5;
                         }
             }
 
-            mst = mst->next;
+            secid = secid->next;
           }
         }
       }
@@ -1433,10 +1462,21 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   }
 
   /* Loop through trace list, synchronizing with database */
-  mst = flp->mstg->traces;
-  while (mst)
+  secid = flp->mstl->traces;
+  while (secid)
   {
-    sd = (struct sectiondetails *)mst->prvtptr;
+    char secnetwork[11];
+    char secstation[11];
+    char seclocation[11];
+    char secchannel[11];
+
+    /* Parse NSLC components from source ID */
+    if (ms_sid2nslc (secid->sid, secnetwork, secstation, seclocation, secchannel))
+    {
+      return -1;
+    }
+
+    sd = (struct sectiondetails *)secid->prvtptr;
 
     bytecount = sd->endoffset - sd->startoffset + 1;
 
@@ -1451,7 +1491,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       while (tindex)
       {
         snprintf (tmpstring, sizeof (tmpstring), "%.6f=>%lld",
-                  (double)MS_HPTIME2EPOCH (tindex->time),
+                  (double)MS_NSTIME2EPOCH (tindex->time),
                   (long long int)tindex->byteoffset);
 
         if (AddToString (&indexstr, tmpstring, ",", 0, 8388608))
@@ -1492,16 +1532,16 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
     /* Create the time spans and rates arrays for spans */
     if (sd->spans)
     {
-      MSTraceID *id;
-      MSTraceSeg *seg;
+      MS3TraceID *id;
+      MS3TraceSeg *seg;
       char *spansstr = NULL;
       char *ratesstr = NULL;
       int ratemismatches = 0;
 
       if (sd->spans->traces && sd->spans->numtraces != 1)
       {
-        ms_log (2, "Span list contains more than 1 trace ID for %s.%s.%s.%s, something is seriously wrong!\n",
-                mst->network, mst->station, mst->location, mst->channel);
+        ms_log (2, "Span list contains more than 1 trace ID for %s, something is seriously wrong!\n",
+                secid->sid);
         return -1;
       }
 
@@ -1515,8 +1555,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
         {
           /* Create number range value (in interval notation), rounding epoch times to microseconds */
           snprintf (tmpstring, sizeof (tmpstring), "[%.6f:%.6f]",
-                    (double)MS_HPTIME2EPOCH (seg->starttime),
-                    (double)MS_HPTIME2EPOCH (seg->endtime));
+                    (double)MS_NSTIME2EPOCH (seg->starttime),
+                    (double)MS_NSTIME2EPOCH (seg->endtime));
 
           if (AddToString (&spansstr, tmpstring, ",", 0, 8388608))
           {
@@ -1524,8 +1564,10 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
             return -1;
           }
 
+          //TODO DETERMINE and set sd->nomsamprate FROM sd->spans, change logic below
+
           /* Track if segment rate is in tolerance with trace/row rate */
-          if (!MS_ISRATETOLERABLE (seg->samprate, mst->samprate))
+          if (!MS_ISRATETOLERABLE (seg->samprate, secid->samprate))
           {
             ratemismatches += 1;
           }
@@ -1592,12 +1634,14 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       char updatedstr[50];
       char scannedstr[50];
 
+      //TODO, add pub version
+
       /* Create time strings for SQLite time fields */
-      ms_hptime2isotimestr (sd->earliest, starttimestr, 1);
-      ms_hptime2isotimestr (sd->latest, endtimestr, 1);
-      ms_hptime2isotimestr (MS_EPOCH2HPTIME (flp->filemodtime), filemodtimestr, 0);
-      ms_hptime2isotimestr (MS_EPOCH2HPTIME (sd->updated), updatedstr, 0);
-      ms_hptime2isotimestr (MS_EPOCH2HPTIME (flp->scantime), scannedstr, 0);
+      ms_nstime2timestr (sd->earliest, starttimestr, ISOMONTHDAY, NANO_MICRO_NONE);
+      ms_nstime2timestr (sd->latest, endtimestr, ISOMONTHDAY, NANO_MICRO_NONE);
+      ms_nstime2timestr (MS_EPOCH2NSTIME (flp->filemodtime), filemodtimestr, ISOMONTHDAY, NONE);
+      ms_nstime2timestr (MS_EPOCH2NSTIME (sd->updated), updatedstr, ISOMONTHDAY, NONE);
+      ms_nstime2timestr (MS_EPOCH2NSTIME (flp->scantime), scannedstr, ISOMONTHDAY, NONE);
 
       /* Insert new row */
       rv = SQLiteExec (dbconn, NULL, NULL, &errmsg,
@@ -1612,10 +1656,11 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
                        "%s,%s,%s,%s,"
                        "'%s','%s','%s')",
                        table,
-                       mst->network,
-                       mst->station,
-                       mst->location,
-                       mst->channel,
+                       secnetwork,
+                       secstation,
+                       seclocation,
+                       secchannel,
+                       CHAD
                        mst->dataquality,
                        starttimestr, endtimestr,
                        mst->samprate, flp->filename, sd->startoffset, bytecount, sd->digeststr,
@@ -1758,9 +1803,9 @@ SQLitePrepare (sqlite3 *dbconn, sqlite3_stmt **statement, const char *format, ..
 } /* End of SQLitePrepare() */
 
 /***************************************************************************
- * Local_mst_printtracelist:
+ * local_mstl_printtracelist:
  *
- * Print trace list summary information for the specified MSTraceGroup.
+ * Print trace list summary information for the specified MSTraceList.
  *
  * The timeformat flag can either be:
  * 0 : SEED time format (year, day-of-year, hour, min, sec)
@@ -1768,105 +1813,112 @@ SQLitePrepare (sqlite3 *dbconn, sqlite3_stmt **statement, const char *format, ..
  * 2 : Epoch time, seconds since the epoch
  ***************************************************************************/
 void
-Local_mst_printtracelist (MSTraceGroup *mstg, flag timeformat)
+local_mstl_printtracelist (MSTraceList *mstl, flag timeformat)
 {
   struct sectiondetails *sd;
-  MSTrace *mst = 0;
+  MSTraceID *id = 0;
+  MSTraceID *seg = 0;
   char srcname[50];
   char stime[30];
   char etime[30];
 
-  if (!mstg)
+  if (!mslt)
   {
     return;
   }
 
-  mst = mstg->traces;
+  id = mstl->traces;
 
   /* Print out header */
   ms_log (0, "   Source                Earliest sample          Latest sample          Hz\n");
 
-  while (mst)
+  while (id)
   {
-    mst_srcname (mst, srcname, 1);
-    sd = (struct sectiondetails *)mst->prvtptr;
-
-    /* Create formatted time strings */
-    if (timeformat == 2)
+    seg = id->first;
+    while (seg)
     {
-      snprintf (stime, sizeof (stime), "%.6f", (double)MS_HPTIME2EPOCH (sd->earliest));
-      snprintf (etime, sizeof (etime), "%.6f", (double)MS_HPTIME2EPOCH (sd->latest));
-    }
-    else if (timeformat == 1)
-    {
-      if (ms_hptime2isotimestr (sd->earliest, stime, 1) == NULL)
-        ms_log (2, "Cannot convert earliest time for %s\n", srcname);
+      sd = (struct sectiondetails *)seg->prvtptr;
 
-      if (ms_hptime2isotimestr (sd->latest, etime, 1) == NULL)
-        ms_log (2, "Cannot convert latest time for %s\n", srcname);
-    }
-    else
-    {
-      if (ms_hptime2seedtimestr (sd->earliest, stime, 1) == NULL)
-        ms_log (2, "Cannot convert earliest time for %s\n", srcname);
-
-      if (ms_hptime2seedtimestr (sd->latest, etime, 1) == NULL)
-        ms_log (2, "Cannot convert latest time for %s\n", srcname);
-    }
-
-    /* Print trace info */
-    ms_log (0, "%-17s %-24s %-24s  %-3.3g\n",
-            srcname, stime, etime, mst->samprate);
-
-    if (sd->tindex && verbose >= 3)
-    {
-      struct timeindex *tindex = sd->tindex;
-
-      ms_log (0, "Time index:\n");
-      while (tindex)
+      /* Create formatted time strings */
+      if (timeformat == 2)
       {
-        snprintf (stime, sizeof (stime), "%.6f", (double)MS_HPTIME2EPOCH (tindex->time));
-
-        if (ms_hptime2isotimestr (tindex->time, etime, 1) == NULL)
-          ms_log (2, "Cannot convert index time for %s\n", srcname);
-
-        ms_log (0, "  %s (%s) - %lld\n", stime, etime, (long long int)tindex->byteoffset);
-
-        tindex = tindex->next;
+        snprintf (stime, sizeof (stime), "%.6f", (double)MS_NSTIME2EPOCH (sd->earliest));
+        snprintf (etime, sizeof (etime), "%.6f", (double)MS_NSTIME2EPOCH (sd->latest));
       }
-    }
-
-    if (sd->spans && verbose >= 3)
-    {
-      MSTraceID *id = 0;
-      MSTraceSeg *seg = 0;
-
-      if (sd->spans->traces && sd->spans->numtraces != 1)
-        ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
-
-      id = sd->spans->traces;
-      while (id)
+      else if (timeformat == 1)
       {
-        ms_log (0, "Span list:\n");
+        if (ms_nstime2timestr (sd->earliest, stime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
+          ms_log (2, "Cannot convert earliest time for %s\n", srcname);
 
-        seg = id->first;
-        while (seg)
+        if (ms_nstime2timestr (sd->latest, etime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
+          ms_log (2, "Cannot convert latest time for %s\n", srcname);
+      }
+      else
+      {
+        if (ms_nstime2timestr (sd->earliest, stime, SEEDORDINAL, NANO_MICRO_NONE) == NULL)
+          ms_log (2, "Cannot convert earliest time for %s\n", srcname);
+
+        if (ms_nstime2timestr (sd->latest, etime, SEEDORDINAL, NANO_MICRO_NONE) == NULL)
+          ms_log (2, "Cannot convert latest time for %s\n", srcname);
+      }
+
+      /* Print trace info */
+      ms_log (0, "%-17s %-24s %-24s  %-3.3g\n",
+              srcname, stime, etime, mst->samprate);
+
+      if (sd->tindex && verbose >= 3)
+      {
+        struct timeindex *tindex = sd->tindex;
+
+        ms_log (0, "Time index:\n");
+        while (tindex)
         {
-          if (ms_hptime2isotimestr (seg->starttime, stime, 1) == NULL)
-            ms_log (2, "Cannot convert span start time for %s\n", id->srcname);
+          snprintf (stime, sizeof (stime), "%.6f", (double)MS_NSTIME2EPOCH (tindex->time));
 
-          if (ms_hptime2isotimestr (seg->endtime, etime, 1) == NULL)
-            ms_log (2, "Cannot convert span end time for %s\n", id->srcname);
+          if (ms_nstime2timestr (tindex->time, etime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
+            ms_log (2, "Cannot convert index time for %s\n", srcname);
 
-          ms_log (0, "  %s - %s\n", stime, etime);
+          ms_log (0, "  %s (%s) - %lld\n", stime, etime, (long long int)tindex->byteoffset);
 
-          seg = seg->next;
+          tindex = tindex->next;
         }
-        id = id->next;
       }
+
+      if (sd->spans && verbose >= 3)
+      {
+        MSTraceID *spanid = 0;
+        MSTraceSeg *spanseg = 0;
+
+        if (sd->spans->traces && sd->spans->numtraces != 1)
+          ms_log (2, "Span list contains more than 1 trace ID, something is seriously wrong!\n");
+
+        spanid = sd->spans->traces;
+        while (spanid)
+        {
+          ms_log (0, "Span list:\n");
+
+          spanseg = spanid->first;
+          while (spanseg)
+          {
+            if (ms_nstime2timestr (spanseg->starttime, stime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
+              ms_log (2, "Cannot convert span start time for %s\n", spanid->srcname);
+
+            if (ms_nstime2timestr (spanseg->endtime, etime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
+              ms_log (2, "Cannot convert span end time for %s\n", spanid->srcname);
+
+            ms_log (0, "  %s - %s\n", stime, etime);
+
+            spanseg = spanseg->next;
+          }
+
+          spanid = spanid->next;
+        }
+      }
+
+      seg = seg->next;
     }
 
-    mst = mst->next;
+    id = id->next;
   }
 } /* End of Local_mst_printtracelist() */
 
@@ -1914,10 +1966,12 @@ ProcessParam (int argcount, char **argvec)
     else if (strcmp (argvec[optind], "-tt") == 0)
     {
       timetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
+      tolerance.time = timetol_callback;
     }
     else if (strcmp (argvec[optind], "-rt") == 0)
     {
       sampratetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
+      tolerance.samprate = samprate_callback;
     }
     else if (strncmp (argvec[optind], "-table", 6) == 0)
     {
@@ -2277,7 +2331,7 @@ AddToString (char **string, char *add, char *delim, int where, int maxlen)
 static void
 Usage (void)
 {
-  fprintf (stderr, "%s - Synchronize Mini-SEED to database schema version: %s\n\n", PACKAGE, VERSION);
+  fprintf (stderr, "%s - Synchronize miniSEED to database schema version: %s\n\n", PACKAGE, VERSION);
   fprintf (stderr, "Usage: %s [options] file1 [file2] [file3] ...\n\n", PACKAGE);
   fprintf (stderr,
            " ## General options ##\n"
@@ -2308,7 +2362,7 @@ Usage (void)
            " -TRACE         Enable Postgres libpq tracing facility and direct output to stderr\n"
            " -sqlitebusyto msec   Set the SQLite busy timeout in milliseconds, currently: %lu\n"
            "\n"
-           " files          File(s) of Mini-SEED records, list files prefixed with '@'\n"
+           " files          File(s) of miniSEED records, list files prefixed with '@'\n"
            "\n",
            table, dbport, dbname, dbuser, sqlitebusyto);
 } /* End of Usage() */

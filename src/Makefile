@@ -13,8 +13,8 @@ OBJS = $(SRCS:.c=.o)
 EXTRACFLAGS = -I../libmseed -I../sqlite
 EXTRALDFLAGS = -L../libmseed -I../sqlite
 
-ifdef WITHOUTPOSTGRESQL
-EXTRACFLAGS += -DWITHOUTPOSTGRESQL
+ifdef WITHPOSTGRESQL
+EXTRACFLAGS += -DWITHPOSTGRESQL
 LDLIBS = -lmseed
 else
 LDLIBS = -lmseed -lpq

@@ -78,7 +78,7 @@ class InstallBase():
     def compile_and_install_mseedindex(self, mseedindex_path):
         """Used the subprocess module to compile/install mseedindex."""
         # compile the software
-        cmd = "WITHOUTPOSTGRESQL=1 CFLAGS='-O2' make"
+        cmd = "CFLAGS='-O2' make"
         subprocess.check_call(cmd, cwd=mseedindex_path, shell=True)
         mseedindex_binary = os.path.join(mseedindex_path, 'mseedindex')
         mseedindex_binary_dest = self.get_mseedindex_path()

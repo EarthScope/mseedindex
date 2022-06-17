@@ -95,7 +95,7 @@
 #include <sys/stat.h>
 #include <time.h>
 
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
 #include <libpq-fe.h>
 #endif
 
@@ -171,7 +171,7 @@ double timetol_callback (MS3Record *msr) { return timetol; }
 double samprate_callback (MS3Record *msr) { return sampratetol; }
 
 struct timeindex *AddTimeIndex (struct timeindex **tindex, nstime_t time, int64_t byteoffset);
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
 static int SyncPostgres (void);
 static int SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp);
 static PGresult *PQuery (PGconn *pgdb, const char *format, ...);
@@ -423,7 +423,7 @@ main (int argc, char **argv)
   /* Synchronize details with database */
   if (!nosync)
   {
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
     if (pghost && SyncPostgres ())
     {
       ms_log (2, "Error synchronizing with Postgres\n");
@@ -488,7 +488,7 @@ AddTimeIndex (struct timeindex **tindex, nstime_t time, int64_t byteoffset)
   return nindex;
 } /* End of AddTimeIndex */
 
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
 /***************************************************************************
  * SyncPostgres():
  *
@@ -1979,7 +1979,7 @@ ProcessParam (int argcount, char **argvec)
     }
     else if (strncmp (argvec[optind], "-pghost", 7) == 0)
     {
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
       pghost = strdup (GetOptValue (argcount, argvec, optind++));
 #else
       ms_log(2, "%s was not compiled with Postgres support\n", PACKAGE);
@@ -2345,7 +2345,7 @@ Usage (void)
            " -tt secs       Specify a time tolerance for continuous traces\n"
            " -rt diff       Specify a sample rate tolerance for continuous traces\n"
            "\n"
-#ifndef WITHOUTPOSTGRESQL
+#ifdef WITHPOSTGRESQL
            "Either the -pghost or -sqlite argument is required\n"
            " -pghost  host  Specify Postgres database host, e.g. timeseriesdb\n"
 #else

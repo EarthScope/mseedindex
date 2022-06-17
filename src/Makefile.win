@@ -5,7 +5,7 @@
 NODEBUG=1
 
 INCS = /I..\libmseed /I..\sqlite
-OPTS = -D_CRT_SECURE_NO_WARNINGS -DWITHOUTPOSTGRESQL
+OPTS = -D_CRT_SECURE_NO_WARNINGS
 LIBS = ..\libmseed\libmseed.lib
 
 BIN = ..\mseedindex.exe

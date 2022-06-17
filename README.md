@@ -32,9 +32,9 @@ For example, if Postgres is installed in non-system locations:
 * CFLAGS='-I/Library/PostgreSQL/9.5/include'
 * LDFLAGS='-L/Library/PostgreSQL/9.5/lib/'
 
-To build without PostgreSQL support set the variable WITHOUTPOSTGRESQL.
+To build _with_ PostgreSQL support set the variable WITHPOSTGRESQL.
 This can be done in a single command with make like:
-$ WITHOUTPOSTGRESQL=1 make
+$ WITHPOSTGRESQL=1 make
 
 For further installation simply copy the resulting binary and man page
 (in the 'doc' directory) to appropriate system directories.

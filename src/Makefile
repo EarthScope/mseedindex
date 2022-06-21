@@ -15,9 +15,9 @@ EXTRALDFLAGS = -L../libmseed -I../sqlite
 
 ifdef WITHPOSTGRESQL
 EXTRACFLAGS += -DWITHPOSTGRESQL
-LDLIBS = -lmseed
-else
 LDLIBS = -lmseed -lpq
+else
+LDLIBS = -lmseed
 endif
 
 # Specific defines for sqlite3

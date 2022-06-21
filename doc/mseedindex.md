@@ -1,4 +1,4 @@
-# <p >Synchronize Mini-SEED summary and index with database</p>
+# <p >Synchronize miniSEED summary and index with database</p>
 
 1. [Name](#)
 1. [Synopsis](#synopsis)
@@ -18,7 +18,7 @@ mseedindex [options] file1 [file2 file3 ...]
 
 ## <a id='description'>Description</a>
 
-<p ><b>mseedindex</b> reads Mini-SEED, determines contiguous data sections of time series (same network, station, location, channel and quality) and synchronizes information about each data section with a database.</p>
+<p ><b>mseedindex</b> reads miniSEED, determines contiguous data sections of time series (same network, station, location, channel and version) and optionally synchronizes information about each data section with a database.</p>
 
 <p >The location of a given section is represented in the database as starting at a byte offset in a file and a count of bytes that follow. Each section of data is a row in the schema.</p>
 
@@ -90,6 +90,10 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">Specify a sample rate tolerance for constructing continuous trace segments. The tolerance is specified as the difference between two sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) < 0.0001).</p>
 
+<b>-si </b><i>secs</i>
+
+<p style="padding-left: 30px;">Specify the sub-indexing interval in seconds, default is 3600 (1 hour). This parameter controls how often a time index is created with an otherwise contiguous data section.</p>
+
 <b>-table </b><i>tablename</i>
 
 <p style="padding-left: 30px;">Specify the database table name, default value is 'tsindex'.</p>
@@ -160,4 +164,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2019/10/17)
+(man page 2022/06/20)

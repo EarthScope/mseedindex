@@ -1,6 +1,6 @@
-.TH MSEEDINDEX 1 2019/10/17
+.TH MSEEDINDEX 1 2022/06/20
 .SH NAME
-Synchronize Mini-SEED summary and index with database
+Synchronize miniSEED summary and index with database
 
 .SH SYNOPSIS
 .nf
@@ -8,9 +8,10 @@ mseedindex [options] file1 [file2 file3 ...]
 
 .fi
 .SH DESCRIPTION
-\fBmseedindex\fP reads Mini-SEED, determines contiguous data sections
-of time series (same network, station, location, channel and quality)
-and synchronizes information about each data section with a database.
+\fBmseedindex\fP reads miniSEED, determines contiguous data sections
+of time series (same network, station, location, channel and version)
+and optionally synchronizes information about each data section with a
+database.
 
 The location of a given section is represented in the database as
 starting at a byte offset in a file and a count of bytes that follow.
@@ -121,6 +122,11 @@ Specify a sample rate tolerance for constructing continuous trace
 segments. The tolerance is specified as the difference between two
 sampling rates.  The default tolerance is tested as: (abs(1-sr1/sr2) <
 0.0001).
+
+.IP "-si \fIsecs\fP"
+Specify the sub-indexing interval in seconds, default is 3600 (1 hour).
+This parameter controls how often a time index is created with an
+otherwise contiguous data section.
 
 .IP "-table \fItablename\fP"
 Specify the database table name, default value is 'tsindex'.

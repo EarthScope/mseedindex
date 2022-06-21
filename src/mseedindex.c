@@ -1944,6 +1944,10 @@ ProcessParam (int argcount, char **argvec)
       sampratetol = strtod (GetOptValue (argcount, argvec, optind++), NULL);
       tolerance.samprate = samprate_callback;
     }
+    else if (strcmp (argvec[optind], "-si") == 0)
+    {
+      subindex = strtol (GetOptValue (argcount, argvec, optind++), NULL, 10);
+    }
     else if (strncmp (argvec[optind], "-table", 6) == 0)
     {
       table = strdup (GetOptValue (argcount, argvec, optind++));
@@ -2315,6 +2319,7 @@ Usage (void)
            " -kp            Keep specified paths, by default absolute paths are stored\n"
            " -tt secs       Specify a time tolerance for continuous traces\n"
            " -rt diff       Specify a sample rate tolerance for continuous traces\n"
+           " -si secs       Specify a sub-indexing interval, currently: %d\n"
            "\n"
 #ifdef WITHPOSTGRESQL
            "Either the -pghost or -sqlite argument is required\n"
@@ -2335,5 +2340,5 @@ Usage (void)
            "\n"
            " files          File(s) of miniSEED records, list files prefixed with '@'\n"
            "\n",
-           table, dbport, dbname, dbuser, sqlitebusyto);
+           subindex, table, dbport, dbname, dbuser, sqlitebusyto);
 } /* End of Usage() */

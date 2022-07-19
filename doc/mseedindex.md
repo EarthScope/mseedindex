@@ -24,6 +24,8 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p >Data files should be scanned or synchronized when they are in-place. By default the absolute path to each input file will be resolved and stored.</p>
 
+<p >If '-' is specified as an input file, records will be read from standard input.  Some other software is then responsible for tracking the location (path) of the data.  This can be used with the <b>-json</b> output option, where the index information is externally processed and the real path can be ignored or inserted.</p>
+
 <p >Any existing rows in the database that match the file being synchronized will be replaced during synchronization, assuming the original and replacement files contain data that is within 1 day of overlapping.  This operation is done as a database transaction containing all deletions and all insertions.  See <b>FILE VERSIONING</b> for a description of how to avoid race conditions while simultaneously updating data files and extracting data.</p>
 
 <p >PostgreSQL (version >= 9.1) and SQLite3 are supported as target databases.  When using Postgres the specified table is expected to exist.  When using SQLite both the database file and table will be created as needed, along with some indexes on common fields.</p>
@@ -100,11 +102,15 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <b>-pghost </b><i>hostname</i>
 
-<p style="padding-left: 30px;">Specify the Postgres database host name.  Either this option or <b>sqlite</b> must be specified.</p>
+<p style="padding-left: 30px;">Specify the Postgres database host name.</p>
 
 <b>-sqlite </b><i>file</i>
 
-<p style="padding-left: 30px;">Specify the SQLite3 database file name, e.g. 'timeseries.sqlite'. Either this option or <b>pghost</b> must be specified.</p>
+<p style="padding-left: 30px;">Specify the SQLite3 database file name, e.g. 'timeseries.sqlite'.</p>
+
+<b>-json </b><i>file</i>
+
+<p style="padding-left: 30px;">Specify file to write JSON-formatted index information.</p>
 
 <b>-dbport </b><i>port</i>
 
@@ -164,4 +170,4 @@ IRIS Data Management Center
 </pre>
 
 
-(man page 2022/06/20)
+(man page 2022/07/19)

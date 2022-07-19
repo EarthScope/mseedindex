@@ -102,6 +102,7 @@
 #include <sqlite3.h>
 
 #include <libmseed.h>
+#include <parson.h>
 
 #if defined(LMP_WIN)
 #define asprintf internal_asprintf
@@ -120,14 +121,15 @@ static flag noupdate = 0;         /* Control replacement of rows in database, 1 
 static int  subindex = 3600;      /* Interval (seconds) to create sub-index entries for a section */
 
 static char *table = "tsindex";
-static char *pghost = 0;
-static char *sqlitefile = 0;
+static char *pghost = NULL;
+static char *sqlitefile = NULL;
+static char *jsonfile = NULL;
 static unsigned long int sqlitebusyto = 10000;
 
 static char *dbport = "5432";
 static char *dbname = "timeseries";
 static char *dbuser = "timeseries";
-static char *dbpass = 0;
+static char *dbpass = NULL;
 
 static flag dbconntrace = 0; /* Trace database interactions, for debugging */
 
@@ -144,6 +146,7 @@ struct sectiondetails
   int64_t endoffset;
   nstime_t earliest;
   nstime_t latest;
+  int format;
   time_t updated;
   md5_state_t digeststate;
   char digeststr[33];
@@ -159,12 +162,14 @@ struct filelink
   char *filename;
   time_t filemodtime;
   time_t scantime;
+  nstime_t earliest;
+  nstime_t latest;
   MS3TraceList *mstl;
   struct filelink *next;
 };
 
-struct filelink *filelist = 0;
-struct filelink *filelisttail = 0;
+struct filelink *filelist = NULL;
+struct filelink *filelisttail = NULL;
 
 static double timetol = -1.0;     /* Time tolerance for continuous traces */
 static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces */
@@ -183,6 +188,7 @@ static int SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp);
 static int SQLiteExec (sqlite3 *dbconn, int (*callback) (void *, int, char **, char **),
                        void *callbackdata, char **errmsg, const char *format, ...);
 static int SQLitePrepare (sqlite3 *dbconn, sqlite3_stmt **statement, const char *format, ...);
+static int OutputJSON (const char *filename);
 static void local_mstl_printtracelist (MS3TraceList *mstl, flag timeformat);
 static int ProcessParam (int argcount, char **argvec);
 static char *GetOptValue (int argcount, char **argvec, int argopt);
@@ -208,7 +214,7 @@ main (int argc, char **argv)
   struct stat st;
 
   off_t filepos = 0;
-  off_t prevfilepos = 0;
+  off_t nextfilepos = 0;
 
   /* Set default error message prefix */
   ms_loginit (NULL, NULL, NULL, "ERROR: ");
@@ -251,16 +257,22 @@ main (int argc, char **argv)
       exit (1);
     }
 
-    if (stat (flp->filename, &st))
+    flp->scantime = time (NULL);
+    flp->filemodtime = flp->scantime;
+
+    if (strcmp (flp->filename, "-") != 0)
     {
-      ms_log (2, "Could not stat %s: %s\n", flp->filename, strerror (errno));
-      exit (1);
+      if (stat (flp->filename, &st))
+      {
+        ms_log (2, "Could not stat %s: %s\n", flp->filename, strerror (errno));
+        exit (1);
+      }
+
+      flp->filemodtime = st.st_mtime;
     }
 
-    flp->filemodtime = st.st_mtime;
-    flp->scantime = time (NULL);
     secid = NULL;
-    prevfilepos = 0;
+    nextfilepos = 0;
     prevstarttime = NSTERROR;
 
     /* Read records from the input file */
@@ -273,7 +285,7 @@ main (int argc, char **argv)
       if (secid &&
           strcmp (secid->sid, msr->sid) == 0 &&
           secid->pubversion == msr->pubversion &&
-          filepos == (prevfilepos + msr->reclen))
+          filepos == nextfilepos)
       {
         sd = (struct sectiondetails *)secid->prvtptr;
         sd->endoffset = filepos + msr->reclen - 1;
@@ -288,6 +300,10 @@ main (int argc, char **argv)
         if (!sd->nomsamprate_mismatch &&
             !MS_ISRATETOLERABLE (sd->nomsamprate, msr->samprate) )
           sd->nomsamprate_mismatch = 1;
+
+        /* Track format version, unset if mixed versions */
+        if (sd->format && sd->format != msr->formatversion)
+          sd->format = 0;
 
         /* Unset time order record indicator if not in time order */
         if (msr->starttime <= prevstarttime)
@@ -358,6 +374,7 @@ main (int argc, char **argv)
         sd->endoffset = filepos + msr->reclen - 1;
         sd->earliest = msr->starttime;
         sd->latest = endtime;
+        sd->format = msr->formatversion;
         sd->updated = flp->filemodtime; /* Set section update time to file modification time */
         sd->nomsamprate = msr->samprate;
         sd->nomsamprate_mismatch = 0;
@@ -397,7 +414,7 @@ main (int argc, char **argv)
         md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
       }
 
-      prevfilepos = filepos;
+      nextfilepos = filepos + msr->reclen;
       prevstarttime = msr->starttime;
     } /* Done reading records */
 
@@ -422,6 +439,35 @@ main (int argc, char **argv)
     flp = flp->next;
   } /* End of looping over file list for reading */
 
+  /* Create all MD5 digest strings and track file extents */
+  flp = filelist;
+  while (flp)
+  {
+    md5_byte_t digest[16];
+
+    secid = filelist->mstl->traces;
+    while (secid)
+    {
+      if ((sd = (struct sectiondetails *)secid->prvtptr))
+      {
+        /* Calculate MD5 digest and create string representation */
+        md5_finish (&(sd->digeststate), digest);
+        for (int idx = 0; idx < 16; idx++)
+          sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
+
+        /* Determine earliest and latest times for the file */
+        if (flp->earliest == NSTERROR || flp->earliest > sd->earliest)
+          flp->earliest = sd->earliest;
+        if (flp->latest == NSTERROR || flp->latest < sd->latest)
+          flp->latest = sd->latest;
+      }
+
+      secid = secid->next;
+    }
+
+    flp = flp->next;
+  }
+
   /* Synchronize details with database */
   if (!nosync)
   {
@@ -438,6 +484,12 @@ main (int argc, char **argv)
       ms_log (2, "Error synchronizing with SQLite\n");
       exit (1);
     }
+  }
+
+  if (jsonfile && OutputJSON (jsonfile))
+  {
+    ms_log (2, "Error writing JSON to %s\n", jsonfile);
+    exit (1);
   }
 
   return 0;
@@ -630,10 +682,6 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   char *vp;
   char *ep = NULL;
   double version = -1.0;
-  md5_byte_t digest[16];
-
-  nstime_t fileearliest = NSTERROR;
-  nstime_t filelatest = NSTERROR;
 
   if (!flp)
     return -1;
@@ -658,28 +706,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       ms_log (1, "Parsed version %g from %s\n", version, flp->filename);
   }
 
-  /* Loop through trace list, create MD5 digest strings and track file extents */
-  secid = flp->mstl->traces;
-  while (secid)
-  {
-    if ((sd = (struct sectiondetails *)secid->prvtptr))
-    {
-      /* Calculate MD5 digest and create string representation */
-      md5_finish (&(sd->digeststate), digest);
-      for (idx = 0; idx < 16; idx++)
-        sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
-
-      /* Determine earliest and latest times for the file */
-      if (fileearliest == NSTERROR || fileearliest > sd->earliest)
-        fileearliest = sd->earliest;
-      if (filelatest == NSTERROR || filelatest < sd->latest)
-        filelatest = sd->latest;
-    }
-
-    secid = secid->next;
-  }
-
-  if (fileearliest == NSTERROR || filelatest == NSTERROR)
+  if (flp->earliest == NSTERROR || flp->latest == NSTERROR)
   {
     ms_log (2, "No time extents found for %s\n", flp->filename);
     return -1;
@@ -699,16 +726,16 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
                       " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
                       " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        baselength, flp->filename,
-                       (double)MS_NSTIME2EPOCH (filelatest),
-                       (double)MS_NSTIME2EPOCH (fileearliest));
+                       (double)MS_NSTIME2EPOCH (flp->latest),
+                       (double)MS_NSTIME2EPOCH (flp->earliest));
       else
         rv = asprintf (&filewhere,
                        "filename='%s'"
                        " AND starttime <= to_timestamp(%.6f) + interval '1 day'"
                        " AND endtime >= to_timestamp(%.6f) - interval '1 day'",
                        flp->filename,
-                       (double)MS_NSTIME2EPOCH (filelatest),
-                       (double)MS_NSTIME2EPOCH (fileearliest));
+                       (double)MS_NSTIME2EPOCH (flp->latest),
+                       (double)MS_NSTIME2EPOCH (flp->earliest));
 
       if (rv <= 0 || !filewhere)
       {
@@ -1267,10 +1294,6 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   char *vp;
   char *ep = NULL;
   double version = -1.0;
-  md5_byte_t digest[16];
-
-  nstime_t fileearliest = NSTERROR;
-  nstime_t filelatest = NSTERROR;
 
   if (!flp)
     return -1;
@@ -1295,28 +1318,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       ms_log (1, "Parsed version %g from %s\n", version, flp->filename);
   }
 
-  /* Loop through trace list, create MD5 digest strings and track file extents */
-  secid = flp->mstl->traces;
-  while (secid)
-  {
-    if ((sd = (struct sectiondetails *)secid->prvtptr))
-    {
-      /* Calculate MD5 digest and create string representation */
-      md5_finish (&(sd->digeststate), digest);
-      for (idx = 0; idx < 16; idx++)
-        sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
-
-      /* Determine earliest and latest times for the file */
-      if (fileearliest == NSTERROR || fileearliest > sd->earliest)
-        fileearliest = sd->earliest;
-      if (filelatest == NSTERROR || filelatest < sd->latest)
-        filelatest = sd->latest;
-    }
-
-    secid = secid->next;
-  }
-
-  if (fileearliest == NSTERROR || filelatest == NSTERROR)
+  if (flp->earliest == NSTERROR || flp->latest == NSTERROR)
   {
     ms_log (2, "No time extents found for %s\n", flp->filename);
     return -1;
@@ -1326,8 +1328,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   if (dbconn)
   {
     /* Create time strings for earliest and latest times for the file */
-    if (!ms_nstime2timestr (fileearliest, earliest, ISOMONTHDAY, NANO_MICRO_NONE) ||
-        !ms_nstime2timestr (filelatest, latest, ISOMONTHDAY, NANO_MICRO_NONE))
+    if (!ms_nstime2timestr (flp->earliest, earliest, ISOMONTHDAY, NANO_MICRO_NONE) ||
+        !ms_nstime2timestr (flp->latest, latest, ISOMONTHDAY, NANO_MICRO_NONE))
     {
       ms_log (2, "Cannot create earliest/latest time strings for %s\n", flp->filename);
       return -1;
@@ -1793,6 +1795,331 @@ SQLitePrepare (sqlite3 *dbconn, sqlite3_stmt **statement, const char *format, ..
   return rv;
 } /* End of SQLitePrepare() */
 
+
+/***************************************************************************
+ * OutputJSON():
+ *
+ * Write index information to specified output file.  Can be '-' to
+ * write output to stdout.
+ *
+ * Returns 0 on success, and -1 on failure
+ ***************************************************************************/
+static int
+OutputJSON (const char *filename)
+{
+  FILE *fp = NULL;
+  struct filelink *flp = NULL;
+
+  struct sectiondetails *sd;
+  MS3TraceID *secid = NULL;
+  int64_t bytecount;
+  char earliest[64];
+  char latest[64];
+  char pathmod[64];
+  char updated[64];
+  char scanned[64];
+
+  struct timeindex *tindex;
+
+  JSON_Value *rootvalue = NULL;
+  JSON_Object *rootobject = NULL;
+  JSON_Value *pathvalue = NULL;
+  JSON_Array *patharray = NULL;
+  JSON_Value *secvalue = NULL;
+  JSON_Object *secobject = NULL;
+  JSON_Status result;
+  char *serialized_string = NULL;
+
+  if (!filename)
+    return -1;
+
+  /* Open output, using stdout for "-" and creating file if not existing */
+  if (!strcmp (filename, "-"))
+  {
+    fp = stdout;
+  }
+  else if (!(fp = fopen (filename, "wb")))
+  {
+    ms_log (2, "Cannot open JSON output file %s: %s\n", filename, strerror (errno));
+    return -1;
+  }
+
+  if (verbose)
+  {
+    ms_log (1, "Opened JSON output file %s\n", filename);
+  }
+
+  /* Create root array */
+  rootvalue = json_value_init_object ();
+  rootobject = json_value_get_object (rootvalue);
+
+  if (!rootobject)
+  {
+    ms_log (2, "Cannot initialize new JSON value\n");
+    return -1;
+  }
+
+  /* Create JSON representation of trace listing */
+  flp = filelist;
+  while (flp)
+  {
+    /* Create path-specific array */
+    pathvalue = json_value_init_array ();
+    patharray = json_value_get_array (pathvalue);
+    if (!patharray)
+    {
+      ms_log (2, "Cannot initialize path array for %s\n", flp->filename);
+
+      rootobject = NULL;
+      break;
+    }
+
+    if (json_object_set_value (rootobject, flp->filename, pathvalue) != JSONSuccess)
+    {
+      ms_log (2, "Error adding path value to root object\n");
+
+      rootobject = NULL;
+      break;
+    }
+
+    /* Generate time series listing */
+    secid = flp->mstl->traces;
+    while (secid)
+    {
+      char secnetwork[11];
+      char secstation[11];
+      char seclocation[11];
+      char secchannel[11];
+
+      /* Parse NSLC components from source ID */
+      if (ms_sid2nslc (secid->sid, secnetwork, secstation, seclocation, secchannel))
+      {
+        break;
+      }
+
+      sd = (struct sectiondetails *)secid->prvtptr;
+
+      bytecount = sd->endoffset - sd->startoffset + 1;
+
+      /* Create earliest and latest and other time strings */
+      ms_nstime2timestrz (sd->earliest, earliest, ISOMONTHDAY, NANO_MICRO);
+      ms_nstime2timestrz (sd->latest, latest, ISOMONTHDAY, NANO_MICRO);
+      ms_nstime2timestrz (MS_EPOCH2NSTIME(flp->filemodtime), pathmod, ISOMONTHDAY, NONE);
+      ms_nstime2timestrz (MS_EPOCH2NSTIME(sd->updated), updated, ISOMONTHDAY, NONE);
+      ms_nstime2timestrz (MS_EPOCH2NSTIME(flp->scantime), scanned, ISOMONTHDAY, NONE);
+
+      /* Append new section object to path array */
+      secvalue = json_value_init_object ();
+      secobject = json_value_get_object (secvalue);
+      result = json_array_append_value (patharray, secvalue);
+
+      if (!secobject || result != JSONSuccess)
+      {
+        ms_log (2, "Cannot initialize new JSON value\n");
+        break;
+      }
+
+      result = json_object_set_string (secobject, "source_id", secid->sid);
+      if (!result)
+        result = json_object_set_string (secobject, "FDSN_network", secnetwork);
+      if (!result)
+        result = json_object_set_string (secobject, "FDSN_station", secstation);
+      if (!result)
+        result = json_object_set_string (secobject, "FDSN_location", seclocation);
+      if (!result)
+        result = json_object_set_string (secobject, "FDSN_channel", secchannel);
+      if (!result)
+        result = json_object_set_number (secobject, "publication_version", secid->pubversion);
+      if (!result)
+        result = json_object_set_string (secobject, "earliest", earliest);
+      if (!result)
+        result = json_object_set_string (secobject, "latest", latest);
+      if (!result)
+        result = json_object_set_number (secobject, "nominal_sample_rate", sd->nomsamprate);
+      if (!result)
+        result = json_object_set_number (secobject, "byte_offset", sd->startoffset);
+      if (!result)
+        result = json_object_set_number (secobject, "byte_count", bytecount);
+      if (!result)
+        result = json_object_set_string (secobject, "md5hash", sd->digeststr);
+      if (!result)
+        result = json_object_set_boolean (secobject, "time_ordered_records", sd->timeorderrecords);
+
+      if (!result)
+      {
+        char *formatcode = NULL;
+
+        if (sd->format == 2)
+          formatcode = "ms2";
+        else if (sd->format == 3)
+          formatcode = "ms3";
+        else
+          formatcode = "ms";
+
+        result = json_object_set_string (secobject, "format", formatcode);
+      }
+
+      /* If time index includes the earliest data first create the time index array:
+       * 'time1=>offset1,time2=>offset2,time3=>offset3,...'
+       * Otherwise it will not represent the entire time range. */
+      tindex = sd->tindex;
+      if (tindex && tindex->time == sd->earliest)
+      {
+        char etime[32];
+        char element[64];
+        JSON_Value *value = json_value_init_array ();
+        JSON_Array *array = json_value_get_array (value);
+
+        if (json_object_set_value (secobject, "timeindex", value) != JSONSuccess)
+        {
+          ms_log (2, "Error adding timeindex value to section object\n");
+
+          rootobject = NULL;
+          break;
+        }
+
+        while (tindex && !result)
+        {
+          ms_nstime2timestr (tindex->time, etime, UNIXEPOCH, NANO_MICRO);
+          snprintf (element, sizeof (element), "%s=>%lld", etime,
+                    (long long int)tindex->byteoffset);
+
+          result = json_array_append_string (array, element);
+
+          tindex = tindex->next;
+        }
+      }
+
+      /* Create the time spans and rates arrays for spans */
+      if (sd->spans)
+      {
+        MS3TraceID *id;
+        MS3TraceSeg *seg;
+        char element[128];
+        char stime[32];
+        char etime[32];
+
+        JSON_Value *spansValue = json_value_init_array ();
+        JSON_Array *spansArray = json_value_get_array (spansValue);
+
+        JSON_Value *ratesValue = json_value_init_array ();
+        JSON_Array *ratesArray = json_value_get_array (ratesValue);
+
+        if (json_object_set_value (secobject, "timespans", spansValue) != JSONSuccess)
+        {
+          ms_log (2, "Error adding timespans value to section object\n");
+
+          rootobject = NULL;
+          break;
+        }
+
+        if (sd->nomsamprate_mismatch &&
+            json_object_set_value (secobject, "timerates", ratesValue) != JSONSuccess)
+        {
+          ms_log (2, "Error adding timerates value to section object\n");
+
+          rootobject = NULL;
+          break;
+        }
+
+        id = sd->spans->traces;
+        while (id)
+        {
+          /* Create the time spans array:
+           * '[start1:end1],[start2:end2],[start3:end3],...' */
+          seg = id->first;
+          while (seg && !result)
+          {
+            /* Create number range value (in interval notation) */
+            ms_nstime2timestr (seg->starttime, stime, UNIXEPOCH, NANO_MICRO);
+            ms_nstime2timestr (seg->endtime, etime, UNIXEPOCH, NANO_MICRO);
+            snprintf (element, sizeof (element), "[%s:%s]", stime, etime);
+
+            result = json_array_append_string (spansArray, element);
+
+            seg = seg->next;
+          }
+
+          /* Create the time rates array if there are rate mismatches:
+             'rate1,rate2,rate3,...' */
+          if (sd->nomsamprate_mismatch)
+          {
+            seg = id->first;
+            while (seg && !result)
+            {
+              snprintf (element, sizeof (element), "%.6g", seg->samprate);
+
+              result = json_array_append_string (ratesArray, element);
+
+              seg = seg->next;
+            }
+          }
+
+          id = id->next;
+        }
+      }  /* End if (sd->spans) */
+
+      if (!result)
+        result = json_object_set_string (secobject, "path_modtime", pathmod);
+      if (!result)
+        result = json_object_set_string (secobject, "updated", updated);
+      if (!result)
+        result = json_object_set_string (secobject, "scanned", scanned);
+
+      if (result)
+      {
+        ms_log (2, "Cannot add section values\n");
+        break;
+      }
+
+      secid = secid->next;
+    } /* End of section ID loop */
+
+    flp = flp->next;
+  } /* End of looping over file list for synchronization */
+
+  if (rootobject)
+  {
+    /* Serialize JSON to string, pretty if verbose */
+    serialized_string = (verbose > 0) ?
+      json_serialize_to_string_pretty (rootvalue) :
+      json_serialize_to_string (rootvalue);
+
+    if (!serialized_string)
+    {
+      ms_log (2, "Cannot serialize JSON to string %s\n", filename);
+    }
+    else
+    {
+      /* Write JSON to output file */
+      if ((fwrite (serialized_string, strlen(serialized_string), 1, fp)) != 1)
+      {
+        ms_log (2, "Error writing to JSON output file %s\n", filename);
+      }
+
+      /* Print pretty JSON to console */
+      if (verbose)
+        printf ("%s\n", serialized_string);
+    }
+  }
+
+  if (rootvalue)
+  {
+    json_value_free (rootvalue);
+  }
+
+  if (fp)
+  {
+    if (verbose >= 2)
+      ms_log (1, "Closing JSON output file %s\n", filename);
+
+    fclose (fp);
+  }
+
+  return (rootobject) ? 0 : -1;
+} /* End of OutputJSON() */
+
+
 /***************************************************************************
  * local_mstl_printtracelist:
  *
@@ -1964,6 +2291,10 @@ ProcessParam (int argcount, char **argvec)
     {
       sqlitefile = strdup (GetOptValue (argcount, argvec, optind++));
     }
+    else if (strcmp (argvec[optind], "-json") == 0)
+    {
+      jsonfile = strdup (GetOptValue (argcount, argvec, optind++));
+    }
     else if (strncmp (argvec[optind], "-dbport", 7) == 0)
     {
       dbport = strdup (GetOptValue (argcount, argvec, optind++));
@@ -2021,7 +2352,7 @@ ProcessParam (int argcount, char **argvec)
   }
 
   /* Make sure input files were specified */
-  if (filelist == 0)
+  if (!filelist)
   {
     ms_log (2, "No input files were specified\n\n");
     ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
@@ -2030,9 +2361,9 @@ ProcessParam (int argcount, char **argvec)
   }
 
   /* Make sure table was specified if database was specified */
-  if (!nosync && !(pghost || sqlitefile))
+  if (!nosync && !(pghost || sqlitefile || jsonfile))
   {
-    ms_log (2, "No database was specified\n\n");
+    ms_log (2, "No output was specified\n\n");
     ms_log (1, "%s version %s\n\n", PACKAGE, VERSION);
     ms_log (1, "Try %s -h for usage\n", PACKAGE);
     exit (1);
@@ -2067,8 +2398,8 @@ GetOptValue (int argcount, char **argvec, int argopt)
     return 0;
   }
 
-  /* Special case of '-o -' usage */
-  if ((argopt + 1) < argcount && strcmp (argvec[argopt], "-o") == 0)
+  /* Special case of '-json -' usage */
+  if ((argopt + 1) < argcount && strcmp (argvec[argopt], "-json") == 0)
     if (strcmp (argvec[argopt + 1], "-") == 0)
       return argvec[argopt + 1];
 
@@ -2111,10 +2442,12 @@ AddFile (char *filename)
   }
 
   newlp->mstl = NULL;
+  newlp->earliest = NSTERROR;
+  newlp->latest = NSTERROR;
   newlp->next = NULL;
 
   /* Add new file to the end of the list */
-  if (filelisttail == 0)
+  if (!filelisttail)
   {
     filelist = newlp;
     filelisttail = newlp;
@@ -2204,6 +2537,13 @@ ResolveFilePaths (void)
   filelp = filelist;
   while (filelp)
   {
+    /* Skip stdin */
+    if (strcmp (filelp->filename, "-") == 0)
+    {
+      filelp = filelp->next;
+      continue;
+    }
+
     if (realpath (filelp->filename, abspath))
     {
       free (filelp->filename);
@@ -2328,6 +2668,7 @@ Usage (void)
            "The -sqlite argument is required\n"
 #endif
            " -sqlite  file  Specify SQLite database file, e.g. timeseries.sqlite\n"
+           " -json    file  Specify JSON output file, e.g. timeseries.json\n"
            "\n"
            " -table   table Specify database table name, currently: %s\n"
            " -dbport  port  Specify database port, currently: %s\n"

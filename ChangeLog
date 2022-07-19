@@ -1,3 +1,15 @@
+2022.200:
+	- Add -json output option.
+	- Allow reading from stdin when input file is "-".
+	- Fix logic error wth inconsistent record lengths.
+
+2022.172:
+	- Complete porting to libmseed 3.
+	NOTE: Data quality indicators are no longer tracked and have
+	been replaced with version numbers for consistency.
+	No database schema change is needed as the schema already
+	includes fields for both quality and version.
+
 2022.160:
 	- Update libmseed to v3.0.11.
 	- Invert the logic of WITHOUTPOSTGRESQL -> WITHPOSTGRESQL,

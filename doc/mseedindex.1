@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2022/06/20
+.TH MSEEDINDEX 1 2022/07/19
 .SH NAME
 Synchronize miniSEED summary and index with database
 
@@ -20,6 +20,12 @@ Each section of data is a row in the schema.
 Data files should be scanned or synchronized when they are in-place.
 By default the absolute path to each input file will be resolved and
 stored.
+
+If '-' is specified as an input file, records will be read from
+standard input.  Some other software is then responsible for tracking
+the location (path) of the data.  This can be used with the
+\fB-json\fP output option, where the index information is externally
+processed and the real path can be ignored or inserted.
 
 Any existing rows in the database that match the file being
 synchronized will be replaced during synchronization, assuming
@@ -132,13 +138,14 @@ otherwise contiguous data section.
 Specify the database table name, default value is 'tsindex'.
 
 .IP "-pghost \fIhostname\fP"
-Specify the Postgres database host name.  Either this option or
-\fBsqlite\fP must be specified.
+Specify the Postgres database host name.
 
 .IP "-sqlite \fIfile\fP"
 Specify the SQLite3 database file name,
-e.g. 'timeseries.sqlite'. Either this option or \fBpghost\fP must be
-specified.
+e.g. 'timeseries.sqlite'.
+
+.IP "-json \fIfile\fP"
+Specify file to write JSON-formatted index information.
 
 .IP "-dbport \fIport\fP"
 Specify the database host name, default: 5432.

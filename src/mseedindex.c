@@ -1931,13 +1931,13 @@ OutputJSON (const char *filename)
         char *formatcode = NULL;
 
         if (sd->format == 2)
-          formatcode = "ms2";
+          formatcode = "application/vnd.fdsn.mseed;version=2";
         else if (sd->format == 3)
-          formatcode = "ms3";
+          formatcode = "application/vnd.fdsn.mseed;version=3";
         else
-          formatcode = "ms";
+          formatcode = "application/vnd.fdsn.mseed";
 
-        result = json_object_set_string (secobject, "format", formatcode);
+        result = json_object_set_string (secobject, "media-type", formatcode);
       }
 
       if (!result)

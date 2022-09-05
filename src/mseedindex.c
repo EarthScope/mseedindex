@@ -1827,6 +1827,8 @@ OutputJSON (const char *filename)
   JSON_Array *patharray = NULL;
   JSON_Value *secvalue = NULL;
   JSON_Object *secobject = NULL;
+  JSON_Value *fdsnvalue = NULL;
+  JSON_Object *fdsnobject = NULL;
   JSON_Status result;
   char *serialized_string = NULL;
 
@@ -1921,30 +1923,9 @@ OutputJSON (const char *filename)
 
       result = json_object_set_string (secobject, "source_id", secid->sid);
       if (!result)
-        result = json_object_set_string (secobject, "FDSN_network", secnetwork);
-      if (!result)
-        result = json_object_set_string (secobject, "FDSN_station", secstation);
-      if (!result)
-        result = json_object_set_string (secobject, "FDSN_location", seclocation);
-      if (!result)
-        result = json_object_set_string (secobject, "FDSN_channel", secchannel);
-      if (!result)
-        result = json_object_set_number (secobject, "publication_version", secid->pubversion);
-      if (!result)
         result = json_object_set_string (secobject, "earliest", earliest);
       if (!result)
         result = json_object_set_string (secobject, "latest", latest);
-      if (!result)
-        result = json_object_set_number (secobject, "nominal_sample_rate", sd->nomsamprate);
-      if (!result)
-        result = json_object_set_number (secobject, "byte_offset", sd->startoffset);
-      if (!result)
-        result = json_object_set_number (secobject, "byte_count", bytecount);
-      if (!result)
-        result = json_object_set_string (secobject, "md5hash", sd->digeststr);
-      if (!result)
-        result = json_object_set_boolean (secobject, "time_ordered_records", sd->timeorderrecords);
-
       if (!result)
       {
         char *formatcode = NULL;
@@ -1958,6 +1939,25 @@ OutputJSON (const char *filename)
 
         result = json_object_set_string (secobject, "format", formatcode);
       }
+
+      if (!result)
+        result = json_object_set_string (secobject, "path_modtime", pathmod);
+      if (!result)
+        result = json_object_set_string (secobject, "updated", updated);
+      if (!result)
+        result = json_object_set_string (secobject, "scanned", scanned);
+      if (!result)
+        result = json_object_set_number (secobject, "publication_version", secid->pubversion);
+      if (!result)
+        result = json_object_set_number (secobject, "byte_offset", sd->startoffset);
+      if (!result)
+        result = json_object_set_number (secobject, "byte_count", bytecount);
+      if (!result)
+        result = json_object_set_string (secobject, "md5hash", sd->digeststr);
+      if (!result)
+        result = json_object_set_boolean (secobject, "time_ordered_records", sd->timeorderrecords);
+      if (!result)
+        result = json_object_set_number (secobject, "nominal_sample_rate", sd->nomsamprate);
 
       /* If time index includes the earliest data first create the time index array:
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...'
@@ -2059,12 +2059,24 @@ OutputJSON (const char *filename)
         }
       }  /* End if (sd->spans) */
 
+      fdsnvalue = json_value_init_object ();
+      fdsnobject = json_value_get_object (fdsnvalue);
+      result = json_object_set_value (secobject, "FDSN", fdsnvalue);
+
+      if (!fdsnobject || result != JSONSuccess)
+      {
+        ms_log (2, "Cannot initialize new JSON value\n");
+        break;
+      }
+
       if (!result)
-        result = json_object_set_string (secobject, "path_modtime", pathmod);
+        result = json_object_set_string (fdsnobject, "network", secnetwork);
       if (!result)
-        result = json_object_set_string (secobject, "updated", updated);
+        result = json_object_set_string (fdsnobject, "station", secstation);
       if (!result)
-        result = json_object_set_string (secobject, "scanned", scanned);
+        result = json_object_set_string (fdsnobject, "location", seclocation);
+      if (!result)
+        result = json_object_set_string (fdsnobject, "channel", secchannel);
 
       if (result)
       {

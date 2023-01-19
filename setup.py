@@ -29,12 +29,12 @@ except ImportError:
 dist_options = dict(
     name=module_name,
     version = pkg_resources.get_distribution(module_name).version,
-    author="IRIS",
-    author_email="software-owner@iris.washington.edu",
+    author="EarthScope",
+    author_email="software-owner@earthscope.org",
     description="Python hook for installing mseedindex",
     long_description=long_description,
     long_description_content_type="text/markdown",
-    url="https://github.com/iris-edu/mseedindexpypy",
+    url="https://github.com/earthscope/mseedindex",
     packages=find_packages(),
     python_requires='>=2.7, <4',
     classifiers=[
@@ -60,7 +60,7 @@ class InstallBase():
 
     def download_mseedindex(self):
         # download mseed index zip ball
-        url = 'https://api.github.com/repos/iris-edu/mseedindex/zipball'
+        url = 'https://api.github.com/repos/earthscope/mseedindex/zipball'
         temp_dir = gettempdir()
         mseed_index_zip = os.path.join(temp_dir, "mseedindex.zip")
         f = urlopen(url)

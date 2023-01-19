@@ -164,6 +164,7 @@ struct filelink
   time_t scantime;
   nstime_t earliest;
   nstime_t latest;
+  int localpath;
   MS3TraceList *mstl;
   struct filelink *next;
 };
@@ -260,7 +261,7 @@ main (int argc, char **argv)
     flp->scantime = time (NULL);
     flp->filemodtime = flp->scantime;
 
-    if (strcmp (flp->filename, "-") != 0)
+    if (flp->localpath)
     {
       if (stat (flp->filename, &st))
       {
@@ -2456,6 +2457,7 @@ AddFile (char *filename)
   newlp->mstl = NULL;
   newlp->earliest = NSTERROR;
   newlp->latest = NSTERROR;
+  newlp->localpath = 0;
   newlp->next = NULL;
 
   /* Add new file to the end of the list */
@@ -2549,8 +2551,12 @@ ResolveFilePaths (void)
   filelp = filelist;
   while (filelp)
   {
-    /* Skip stdin */
-    if (strcmp (filelp->filename, "-") == 0)
+    /* Skip stdin, http:, https:, file:, ftp: */
+    if (strcmp (filelp->filename, "-") == 0 ||
+        strncasecmp (filelp->filename, "http:", 5) == 0 ||
+        strncasecmp (filelp->filename, "https:", 6) == 0 ||
+        strncasecmp (filelp->filename, "file:", 5) == 0 ||
+        strncasecmp (filelp->filename, "ftp:", 4) == 0)
     {
       filelp = filelp->next;
       continue;
@@ -2573,6 +2579,7 @@ ResolveFilePaths (void)
       return -1;
     }
 
+    filelp->localpath = 1;
     filelp = filelp->next;
   }
 

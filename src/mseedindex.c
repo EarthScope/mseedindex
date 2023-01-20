@@ -1678,7 +1678,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
               secnetwork, secstation, seclocation, secchannel, secid->pubversion,
               (long long int)sd->earliest, (long long int)sd->latest,
               sd->nomsamprate, flp->filename,
-              sd->startoffset, bytecount, sd->digeststr,
+              (long long int)sd->startoffset, (long long int)bytecount, sd->digeststr,
               (long long int)sd->updated, (long long int)flp->scantime);
       printf (" TINDEX: '%s'\n", (timeindexstr)?timeindexstr:"");
       printf (" TSPANS: '%s'\n", (timespansstr)?timespansstr:"");

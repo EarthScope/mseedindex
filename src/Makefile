@@ -26,7 +26,7 @@ endif
 all: $(BIN)
 
 $(BIN): $(OBJS)
-	$(CC) $(CFLAGS) -o ../$@ $(OBJS) $(EXTRALDFLAGS) $(LDFLAGS) $(LDLIBS)
+	$(CC) $(CFLAGS) -o ../$@ $(OBJS) $(EXTRALDFLAGS) $(LDLIBS) $(LDFLAGS)
 
 clean:
 	rm -f $(OBJS) ../$(BIN)
@@ -37,5 +37,5 @@ clean:
 
 install:
 	@echo
-	@echo "No install target, copy the executable and man page as needed"
+	@echo "No install target, copy the executable and documentation as needed"
 	@echo

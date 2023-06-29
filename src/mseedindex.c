@@ -115,6 +115,7 @@
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
+static flag skipnotdata = 0;      /* Used to control skipping of non-miniSEED data */
 static char keeppath = 0;         /* Use originally specified path, do not resolve absolute */
 static flag nosync = 0;           /* Control synchronization with database, 1 = no database */
 static flag noupdate = 0;         /* Control replacement of rows in database, 1 = no updating */
@@ -235,7 +236,9 @@ main (int argc, char **argv)
 
   /* Enable parsing of byte range from files, and skipping of non-miniSEED */
   flags |= MSF_PNAMERANGE;
-  flags |= MSF_SKIPNOTDATA;
+
+  if (skipnotdata)
+    flags |= MSF_SKIPNOTDATA;
 
   /* Read files and accumulate indexing details */
   flp = filelist;
@@ -2176,6 +2179,10 @@ ProcessParam (int argcount, char **argvec)
     {
       verbose += strspn (&argvec[optind][1], "v");
     }
+    else if (strncmp (argvec[optind], "-snd", 4) == 0)
+    {
+      skipnotdata = 1;
+    }
     else if (strncmp (argvec[optind], "-ns", 3) == 0)
     {
       nosync = 1;
@@ -2586,6 +2593,7 @@ Usage (void)
            " -V             Report program version\n"
            " -h             Show this usage message\n"
            " -v             Be more verbose, multiple flags can be used\n"
+           " -snd           Skip non-miniSEED data\n"
            " -ns            No sync, perform data parsing but do not connect to database\n"
            "\n"
            " -noup          No updates, do not search for and replace index rows\n"

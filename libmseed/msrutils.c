@@ -3,7 +3,7 @@
  *
  * This file is part of the miniSEED Library.
  *
- * Copyright (c) 2020 Chad Trabant, IRIS Data Management Center
+ * Copyright (c) 2023 Chad Trabant, EarthScope Data Services
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -237,14 +237,14 @@ msr3_endtime (MS3Record *msr)
 void
 msr3_print (MS3Record *msr, int8_t details)
 {
-  char time[30];
+  char time[40];
   char b;
 
   if (!msr)
     return;
 
   /* Generate a start time string */
-  ms_nstime2timestr (msr->starttime, time, 2, 1);
+  ms_nstime2timestr (msr->starttime, time, ISOMONTHDAY_DOY_Z, NANO_MICRO);
 
   /* Report information in the fixed header */
   if (details > 0)
@@ -259,8 +259,8 @@ msr3_print (MS3Record *msr, int8_t details)
     {
       b = msr->flags;
       ms_log (0, "                  flags: [%d%d%d%d%d%d%d%d] 8 bits\n",
-              bit (b, 0x01), bit (b, 0x02), bit (b, 0x04), bit (b, 0x08),
-              bit (b, 0x10), bit (b, 0x20), bit (b, 0x40), bit (b, 0x80));
+              bit (b, 0x80), bit (b, 0x40), bit (b, 0x20), bit (b, 0x10),
+              bit (b, 0x08), bit (b, 0x04), bit (b, 0x02), bit (b, 0x01));
       if (b & 0x01)
         ms_log (0, "                         [Bit 0] Calibration signals present\n");
       if (b & 0x02)
@@ -295,7 +295,7 @@ msr3_print (MS3Record *msr, int8_t details)
   {
     ms_log (0, "%s, %d, %d, %" PRId64 " samples, %-.10g Hz, %s\n",
             msr->sid, msr->pubversion, msr->reclen,
-            msr->samplecnt, msr->samprate, time);
+            msr->samplecnt, msr3_sampratehz(msr), time);
   }
 } /* End of msr3_print() */
 

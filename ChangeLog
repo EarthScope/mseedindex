@@ -1,3 +1,8 @@
+2023.180:
+	- Re-organize JSON output schema.
+	- When input is stdin, set "mod time" to 0, do not include in JSON.
+	- Update to libmseed 3.0.15 and embedded yyjson library.
+
 2022.200:
 	- Add -json output option.
 	- Allow reading from stdin when input file is "-".

@@ -102,7 +102,7 @@
 #include <sqlite3.h>
 
 #include <libmseed.h>
-#include <parson.h>
+#include <yyjson.h>
 
 #if defined(LMP_WIN)
 #define asprintf internal_asprintf
@@ -205,17 +205,18 @@ main (int argc, char **argv)
   struct sectiondetails *sd = NULL;
   struct filelink *flp = NULL;
   MS3Record *msr = NULL;
+  MS3TraceID *newsecid = NULL;
   MS3TraceID *secid = NULL;
+  MS3FileParam *msfp = NULL;
   uint32_t flags = 0;
   nstime_t endtime = NSTERROR;
   nstime_t nextindex = NSTERROR;
   nstime_t prevstarttime = NSTERROR;
-  char *leapsecondfile = NULL;
   int retcode = MS_NOERROR;
   struct stat st;
 
-  off_t filepos = 0;
-  off_t nextfilepos = 0;
+  int64_t filepos = 0;
+  int64_t nextfilepos = 0;
 
   /* Set default error message prefix */
   ms_loginit (NULL, NULL, NULL, "ERROR: ");
@@ -230,16 +231,7 @@ main (int argc, char **argv)
       return 1;
 
   /* Read leap second list file if env. var. LIBMSEED_LEAPSECOND_FILE is set */
-  if ((leapsecondfile = getenv ("LIBMSEED_LEAPSECOND_FILE")))
-  {
-    if (strcmp (leapsecondfile, "NONE"))
-      ms_readleapsecondfile (leapsecondfile);
-  }
-  else
-  {
-    ms_log (1, "Warning: No leap second file specified with LIBMSEED_LEAPSECOND_FILE\n");
-    ms_log (1, "  This is highly recommended, see usage manual for details.\n");
-  }
+  ms_readleapseconds ("LIBMSEED_LEAPSECOND_FILE");
 
   /* Enable parsing of byte range from files, and skipping of non-miniSEED */
   flags |= MSF_PNAMERANGE;
@@ -259,7 +251,7 @@ main (int argc, char **argv)
     }
 
     flp->scantime = time (NULL);
-    flp->filemodtime = flp->scantime;
+    flp->filemodtime = 0;
 
     if (flp->localpath)
     {
@@ -277,9 +269,10 @@ main (int argc, char **argv)
     prevstarttime = NSTERROR;
 
     /* Read records from the input file */
-    while ((retcode = ms3_readmsr (&msr, flp->filename, &filepos, NULL,
+    while ((retcode = ms3_readmsr_r (&msfp, &msr, flp->filename,
                                    flags, verbose - 2)) == MS_NOERROR)
     {
+      filepos = msfp->streampos - msr->reclen;
       endtime = msr3_endtime (msr);
 
       /* Update details of current section if record matches ID, version and is next in the file */
@@ -339,24 +332,24 @@ main (int argc, char **argv)
       else
       {
         /* Create & populate new ID and add it to the list */
-        if (!(secid = calloc (1, sizeof (MS3TraceID))))
+        if (!(newsecid = calloc (1, sizeof (MS3TraceID))))
         {
           ms_log (2, "Cannot allocate new ID\n");
           return 1;
         }
 
         /* Add new ID to end of list */
-        if (!flp->mstl->last)
+        if (flp->mstl->traces.next[0] == NULL)
         {
-          flp->mstl->traces = secid;
+          flp->mstl->traces.next[0] = newsecid;
         }
         else
         {
-          flp->mstl->last->next = secid;
+          secid->next[0] = newsecid;
         }
 
-        flp->mstl->last = secid;
-        flp->mstl->numtraces++;
+        secid = newsecid;
+        flp->mstl->numtraceids++;
 
         strncpy (secid->sid, msr->sid, sizeof (secid->sid));
         secid->pubversion = msr->pubversion;
@@ -423,12 +416,12 @@ main (int argc, char **argv)
     if (retcode != MS_ENDOFFILE)
     {
       ms_log (2, "Cannot read %s: %s\n", flp->filename, ms_errorstr (retcode));
-      ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
+      ms3_readmsr_r (&msfp, &msr, NULL, 0, 0);
       exit (1);
     }
 
     /* Make sure everything is cleaned up */
-    ms3_readmsr (&msr, NULL, NULL, NULL, 0, 0);
+    ms3_readmsr_r (&msfp, &msr, NULL, 0, 0);
 
     /* Print sections for verbose output */
     if (verbose >= 2)
@@ -446,7 +439,7 @@ main (int argc, char **argv)
   {
     md5_byte_t digest[16];
 
-    secid = filelist->mstl->traces;
+    secid = filelist->mstl->traces.next[0];
     while (secid)
     {
       if ((sd = (struct sectiondetails *)secid->prvtptr))
@@ -463,7 +456,7 @@ main (int argc, char **argv)
           flp->latest = sd->latest;
       }
 
-      secid = secid->next;
+      secid = secid->next[0];
     }
 
     flp = flp->next;
@@ -1386,7 +1379,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
         /* Fields: 0=network,1=station,2=location,3=channel,4=version,5=hash,6=updated */
         for (idx = 0; idx < matchcount; idx++)
         {
-          secid = flp->mstl->traces;
+          secid = flp->mstl->traces.next[0];
           while (secid)
           {
             if ((sd = (struct sectiondetails *)secid->prvtptr))
@@ -1425,7 +1418,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
                         }
             }
 
-            secid = secid->next;
+            secid = secid->next[0];
           }
         }
       }
@@ -1475,7 +1468,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
   }
 
   /* Loop through trace list, synchronizing with database */
-  secid = flp->mstl->traces;
+  secid = flp->mstl->traces.next[0];
   while (secid)
   {
     char secnetwork[11];
@@ -1550,7 +1543,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       char *spansstr = NULL;
       char *ratesstr = NULL;
 
-      id = sd->spans->traces;
+      id = sd->spans->traces.next[0];
       while (id)
       {
         /* Create the time spans array:
@@ -1591,7 +1584,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
           }
         }
 
-        id = id->next;
+        id = id->next[0];
       }
 
       /* Add single quotes to timespans to make a string for the database */
@@ -1701,7 +1694,7 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
       timeratesstr = NULL;
     }
 
-    secid = secid->next;
+    secid = secid->next[0];
   }
 
   /* End the transaction */
@@ -1814,24 +1807,26 @@ OutputJSON (const char *filename)
   struct sectiondetails *sd;
   MS3TraceID *secid = NULL;
   int64_t bytecount;
+  nstime_t earliest_ts = NSTUNSET;
+  nstime_t latest_ts = NSTUNSET;
   char earliest[64];
   char latest[64];
   char pathmod[64];
   char updated[64];
   char scanned[64];
+  char *formatstr;
+  int format = -1;
 
   struct timeindex *tindex;
 
-  JSON_Value *rootvalue = NULL;
-  JSON_Object *rootobject = NULL;
-  JSON_Value *pathvalue = NULL;
-  JSON_Array *patharray = NULL;
-  JSON_Value *secvalue = NULL;
-  JSON_Object *secobject = NULL;
-  JSON_Value *fdsnvalue = NULL;
-  JSON_Object *fdsnobject = NULL;
-  JSON_Status result;
-  char *serialized_string = NULL;
+  yyjson_mut_doc *rootdoc = NULL;
+  yyjson_mut_val *root = NULL;
+  yyjson_mut_val *pathkey = NULL;
+  yyjson_mut_val *pathobj = NULL;
+  yyjson_mut_val *content_arr = NULL;
+  yyjson_mut_val *content = NULL;
+
+  char *serialized = NULL;
 
   if (!filename)
     return -1;
@@ -1852,113 +1847,73 @@ OutputJSON (const char *filename)
     ms_log (1, "Opened JSON output file %s\n", filename);
   }
 
-  /* Create root array */
-  rootvalue = json_value_init_object ();
-  rootobject = json_value_get_object (rootvalue);
-
-  if (!rootobject)
+  /* Init root container */
+  if ((rootdoc = yyjson_mut_doc_new (NULL)) == NULL ||
+      (root = yyjson_mut_obj (rootdoc)) == NULL)
   {
-    ms_log (2, "Cannot initialize new JSON value\n");
+    ms_log (2, "Cannot create JSON document\n");
     return -1;
   }
+
+  /* Set the document's root value. */
+  yyjson_mut_doc_set_root (rootdoc, root);
 
   /* Create JSON representation of trace listing */
   flp = filelist;
   while (flp)
   {
-    /* Create path-specific array */
-    pathvalue = json_value_init_array ();
-    patharray = json_value_get_array (pathvalue);
-    if (!patharray)
-    {
-      ms_log (2, "Cannot initialize path array for %s\n", flp->filename);
+    /* Add root key and object for path entry */
+    pathkey = yyjson_mut_str (rootdoc, flp->filename);
+    pathobj = yyjson_mut_obj (rootdoc);
+    yyjson_mut_obj_add (root, pathkey, pathobj);
 
-      rootobject = NULL;
-      break;
-    }
+    content_arr = yyjson_mut_arr (rootdoc);
 
-    if (json_object_set_value (rootobject, flp->filename, pathvalue) != JSONSuccess)
-    {
-      ms_log (2, "Error adding path value to root object\n");
-
-      rootobject = NULL;
-      break;
-    }
-
-    /* Generate time series listing */
-    secid = flp->mstl->traces;
+    /* Generate content entries */
+    secid = flp->mstl->traces.next[0];
     while (secid)
     {
-      char secnetwork[11];
-      char secstation[11];
-      char seclocation[11];
-      char secchannel[11];
-
-      /* Parse NSLC components from source ID */
-      if (ms_sid2nslc (secid->sid, secnetwork, secstation, seclocation, secchannel))
-      {
-        break;
-      }
-
       sd = (struct sectiondetails *)secid->prvtptr;
 
       bytecount = sd->endoffset - sd->startoffset + 1;
 
+      /* Track format version: all one version, a mixed, or unknonwn */
+      if (format == -1)
+      {
+        format = sd->format;
+      }
+      else if (format != sd->format)
+      {
+        format = 0; /* Mixed or unknown */
+      }
+
+      /* Track earliest and latest times at path level */
+      if (earliest_ts == NSTUNSET || sd->earliest < earliest_ts)
+        earliest_ts = sd->earliest;
+
+      if (latest_ts == NSTUNSET || sd->latest > latest_ts)
+        latest_ts = sd->latest;
+
+      /* Create and populate content array object entry */
+      content = yyjson_mut_obj (rootdoc);
+
+      yyjson_mut_ptr_add (content, "/source_id", yyjson_mut_str (rootdoc, secid->sid), rootdoc);
+
       /* Create earliest and latest and other time strings */
-      ms_nstime2timestrz (sd->earliest, earliest, ISOMONTHDAY, NANO_MICRO);
-      ms_nstime2timestrz (sd->latest, latest, ISOMONTHDAY, NANO_MICRO);
-      ms_nstime2timestrz (MS_EPOCH2NSTIME(flp->filemodtime), pathmod, ISOMONTHDAY, NONE);
-      ms_nstime2timestrz (MS_EPOCH2NSTIME(sd->updated), updated, ISOMONTHDAY, NONE);
-      ms_nstime2timestrz (MS_EPOCH2NSTIME(flp->scantime), scanned, ISOMONTHDAY, NONE);
+      ms_nstime2timestr (sd->earliest, earliest, ISOMONTHDAY_Z, NANO_MICRO);
+      ms_nstime2timestr (sd->latest, latest, ISOMONTHDAY_Z, NANO_MICRO);
+      ms_nstime2timestr (MS_EPOCH2NSTIME(sd->updated), updated, ISOMONTHDAY_Z, NONE);
 
-      /* Append new section object to path array */
-      secvalue = json_value_init_object ();
-      secobject = json_value_get_object (secvalue);
-      result = json_array_append_value (patharray, secvalue);
+      yyjson_mut_ptr_add (content, "/start", yyjson_mut_str (rootdoc, earliest), rootdoc);
+      yyjson_mut_ptr_add (content, "/end", yyjson_mut_str (rootdoc, latest), rootdoc);
+      yyjson_mut_ptr_add (content, "/updated", yyjson_mut_str (rootdoc, updated), rootdoc);
 
-      if (!secobject || result != JSONSuccess)
-      {
-        ms_log (2, "Cannot initialize new JSON value\n");
-        break;
-      }
+      yyjson_mut_ptr_add (content, "/publication_version", yyjson_mut_int (rootdoc, secid->pubversion), rootdoc);
+      yyjson_mut_ptr_add (content, "/byte_offset", yyjson_mut_sint (rootdoc, sd->startoffset), rootdoc);
+      yyjson_mut_ptr_add (content, "/byte_count", yyjson_mut_sint (rootdoc, bytecount), rootdoc);
 
-      result = json_object_set_string (secobject, "source_id", secid->sid);
-      if (!result)
-        result = json_object_set_string (secobject, "earliest", earliest);
-      if (!result)
-        result = json_object_set_string (secobject, "latest", latest);
-      if (!result)
-      {
-        char *formatcode = NULL;
-
-        if (sd->format == 2)
-          formatcode = "application/vnd.fdsn.mseed;version=2";
-        else if (sd->format == 3)
-          formatcode = "application/vnd.fdsn.mseed;version=3";
-        else
-          formatcode = "application/vnd.fdsn.mseed";
-
-        result = json_object_set_string (secobject, "media-type", formatcode);
-      }
-
-      if (!result)
-        result = json_object_set_string (secobject, "path_modtime", pathmod);
-      if (!result)
-        result = json_object_set_string (secobject, "updated", updated);
-      if (!result)
-        result = json_object_set_string (secobject, "scanned", scanned);
-      if (!result)
-        result = json_object_set_number (secobject, "publication_version", secid->pubversion);
-      if (!result)
-        result = json_object_set_number (secobject, "byte_offset", sd->startoffset);
-      if (!result)
-        result = json_object_set_number (secobject, "byte_count", bytecount);
-      if (!result)
-        result = json_object_set_string (secobject, "md5hash", sd->digeststr);
-      if (!result)
-        result = json_object_set_boolean (secobject, "time_ordered_records", sd->timeorderrecords);
-      if (!result)
-        result = json_object_set_number (secobject, "nominal_sample_rate", sd->nomsamprate);
+      yyjson_mut_ptr_add (content, "/md5", yyjson_mut_str (rootdoc, sd->digeststr), rootdoc);
+      yyjson_mut_ptr_add (content, "/time_ordered_records", yyjson_mut_bool (rootdoc, sd->timeorderrecords), rootdoc);
 
       /* If time index includes the earliest data first create the time index array:
        * 'time1=>offset1,time2=>offset2,time3=>offset3,...'
@@ -1966,26 +1921,18 @@ OutputJSON (const char *filename)
       tindex = sd->tindex;
       if (tindex && tindex->time == sd->earliest)
       {
-        char etime[32];
-        char element[64];
-        JSON_Value *value = json_value_init_array ();
-        JSON_Array *array = json_value_get_array (value);
+        yyjson_mut_val *obj;
 
-        if (json_object_set_value (secobject, "timeindex", value) != JSONSuccess)
+        yyjson_mut_ptr_add (content, "/ts_time_byteoffset", yyjson_mut_arr (rootdoc), rootdoc);
+
+        while (tindex)
         {
-          ms_log (2, "Error adding timeindex value to section object\n");
+          obj = yyjson_mut_obj (rootdoc);
 
-          rootobject = NULL;
-          break;
-        }
+          yyjson_mut_ptr_add (obj, "/timestamp", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(tindex->time)), rootdoc);
+          yyjson_mut_ptr_add (obj, "/offset", yyjson_mut_sint (rootdoc, tindex->byteoffset), rootdoc);
 
-        while (tindex && !result)
-        {
-          ms_nstime2timestr (tindex->time, etime, UNIXEPOCH, NANO_MICRO);
-          snprintf (element, sizeof (element), "%s=>%lld", etime,
-                    (long long int)tindex->byteoffset);
-
-          result = json_array_append_string (array, element);
+          yyjson_mut_ptr_add (content, "/ts_time_byteoffset/-", obj, rootdoc);
 
           tindex = tindex->next;
         }
@@ -1996,130 +1943,97 @@ OutputJSON (const char *filename)
       {
         MS3TraceID *id;
         MS3TraceSeg *seg;
-        char element[128];
-        char stime[32];
-        char etime[32];
+        yyjson_mut_val *obj;
 
-        JSON_Value *spansValue = json_value_init_array ();
-        JSON_Array *spansArray = json_value_get_array (spansValue);
+        yyjson_mut_ptr_add (content, "/ts_timespans", yyjson_mut_arr (rootdoc), rootdoc);
 
-        JSON_Value *ratesValue = json_value_init_array ();
-        JSON_Array *ratesArray = json_value_get_array (ratesValue);
-
-        if (json_object_set_value (secobject, "timespans", spansValue) != JSONSuccess)
-        {
-          ms_log (2, "Error adding timespans value to section object\n");
-
-          rootobject = NULL;
-          break;
-        }
-
-        if (sd->nomsamprate_mismatch &&
-            json_object_set_value (secobject, "timerates", ratesValue) != JSONSuccess)
-        {
-          ms_log (2, "Error adding timerates value to section object\n");
-
-          rootobject = NULL;
-          break;
-        }
-
-        id = sd->spans->traces;
+        /* Create the time span entries */
+        id = sd->spans->traces.next[0];
         while (id)
         {
-          /* Create the time spans array:
-           * '[start1:end1],[start2:end2],[start3:end3],...' */
           seg = id->first;
-          while (seg && !result)
+          while (seg)
           {
-            /* Create number range value (in interval notation) */
-            ms_nstime2timestr (seg->starttime, stime, UNIXEPOCH, NANO_MICRO);
-            ms_nstime2timestr (seg->endtime, etime, UNIXEPOCH, NANO_MICRO);
-            snprintf (element, sizeof (element), "[%s:%s]", stime, etime);
+            obj = yyjson_mut_obj (rootdoc);
 
-            result = json_array_append_string (spansArray, element);
+            yyjson_mut_ptr_add (obj, "/start", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(seg->starttime)), rootdoc);
+            yyjson_mut_ptr_add (obj, "/end", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(seg->endtime)), rootdoc);
+            yyjson_mut_ptr_add (obj, "/sample_rate", yyjson_mut_real (rootdoc, seg->samprate), rootdoc);
+
+            yyjson_mut_ptr_add (content, "/ts_timespans/-", obj, rootdoc);
 
             seg = seg->next;
           }
 
-          /* Create the time rates array if there are rate mismatches:
-             'rate1,rate2,rate3,...' */
-          if (sd->nomsamprate_mismatch)
-          {
-            seg = id->first;
-            while (seg && !result)
-            {
-              snprintf (element, sizeof (element), "%.6g", seg->samprate);
-
-              result = json_array_append_string (ratesArray, element);
-
-              seg = seg->next;
-            }
-          }
-
-          id = id->next;
+          id = id->next[0];
         }
       }  /* End if (sd->spans) */
 
-      fdsnvalue = json_value_init_object ();
-      fdsnobject = json_value_get_object (fdsnvalue);
-      result = json_object_set_value (secobject, "FDSN", fdsnvalue);
+      yyjson_mut_arr_append (content_arr, content);
 
-      if (!fdsnobject || result != JSONSuccess)
-      {
-        ms_log (2, "Cannot initialize new JSON value\n");
-        break;
-      }
-
-      if (!result)
-        result = json_object_set_string (fdsnobject, "network", secnetwork);
-      if (!result)
-        result = json_object_set_string (fdsnobject, "station", secstation);
-      if (!result)
-        result = json_object_set_string (fdsnobject, "location", seclocation);
-      if (!result)
-        result = json_object_set_string (fdsnobject, "channel", secchannel);
-
-      if (result)
-      {
-        ms_log (2, "Cannot add section values\n");
-        break;
-      }
-
-      secid = secid->next;
+      secid = secid->next[0];
     } /* End of section ID loop */
+
+    /* Set path-level entries */
+    if (format == 2)
+      formatstr = "application/vnd.fdsn.mseed;version=2";
+    else if (format == 3)
+      formatstr = "application/vnd.fdsn.mseed;version=3";
+    else
+      formatstr = "application/vnd.fdsn.mseed";
+
+    yyjson_mut_ptr_add (pathobj, "/content_type", yyjson_mut_str (rootdoc, formatstr), rootdoc);
+
+    if (flp->filemodtime)
+    {
+      ms_nstime2timestr (MS_EPOCH2NSTIME (flp->filemodtime), pathmod, ISOMONTHDAY_Z, NONE);
+      yyjson_mut_ptr_add (pathobj, "/path_modtime", yyjson_mut_str (rootdoc, pathmod), rootdoc);
+    }
+
+    ms_nstime2timestr (MS_EPOCH2NSTIME (flp->scantime), scanned, ISOMONTHDAY_Z, NONE);
+    yyjson_mut_ptr_add (pathobj, "/path_indextime", yyjson_mut_str (rootdoc, scanned), rootdoc);
+
+    ms_nstime2timestr (earliest_ts, earliest, ISOMONTHDAY_Z, NANO_MICRO);
+    ms_nstime2timestr (latest_ts, latest, ISOMONTHDAY_Z, NANO_MICRO);
+
+    yyjson_mut_ptr_add (pathobj, "/start", yyjson_mut_str (rootdoc, earliest), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/end", yyjson_mut_str (rootdoc, latest), rootdoc);
+
+    /* Add content object to content array */
+    yyjson_mut_ptr_add (pathobj, "/content", content_arr, rootdoc);
 
     flp = flp->next;
   } /* End of looping over file list for synchronization */
 
-  if (rootobject)
+  if (rootdoc)
   {
-    /* Serialize JSON to string, pretty if verbose */
-    serialized_string = (verbose > 0) ?
-      json_serialize_to_string_pretty (rootvalue) :
-      json_serialize_to_string (rootvalue);
+    yyjson_write_flag flg = (verbose > 0) ? YYJSON_WRITE_PRETTY_TWO_SPACES : YYJSON_WRITE_NOFLAG;
+    yyjson_write_err err;
+    size_t serialsize = 0;
 
-    if (!serialized_string)
+    /* Serialize JSON to string, pretty if verbose */
+    serialized = yyjson_mut_write_opts (rootdoc, flg, NULL, &serialsize, &err);
+
+    if (serialized == NULL)
     {
-      ms_log (2, "Cannot serialize JSON to string %s\n", filename);
+      ms_log (2, "Cannot serialize JSON to string: %s\n",
+              (err.msg) ? err.msg : "Unknown error");
     }
     else
     {
       /* Write JSON to output file */
-      if ((fwrite (serialized_string, strlen(serialized_string), 1, fp)) != 1)
+      if ((fwrite (serialized, serialsize, 1, fp)) != 1)
       {
-        ms_log (2, "Error writing to JSON output file %s\n", filename);
+        ms_log (2, "Error writing JSON %s\n", filename);
       }
 
       /* Print pretty JSON to console */
       if (verbose)
-        printf ("%s\n", serialized_string);
+        printf ("%s\n", serialized);
     }
   }
 
-  if (rootvalue)
-  {
-    json_value_free (rootvalue);
-  }
+  yyjson_mut_doc_free (rootdoc);
 
   if (fp)
   {
@@ -2129,7 +2043,7 @@ OutputJSON (const char *filename)
     fclose (fp);
   }
 
-  return (rootobject) ? 0 : -1;
+  return (rootdoc) ? 0 : -1;
 } /* End of OutputJSON() */
 
 
@@ -2160,7 +2074,7 @@ local_mstl_printtracelist (MS3TraceList *mstl, flag timeformat)
   /* Print out header */
   ms_log (0, "   Source                    Earliest sample            Latest sample        Hz\n");
 
-  secid = mstl->traces;
+  secid = mstl->traces.next[0];
   while (secid)
   {
     sd = (struct sectiondetails *)secid->prvtptr;
@@ -2214,7 +2128,7 @@ local_mstl_printtracelist (MS3TraceList *mstl, flag timeformat)
     {
       ms_log (0, "Span list:\n");
 
-      seg = sd->spans->traces->first;
+      seg = sd->spans->traces.next[0]->first;
       while (seg)
       {
         if (ms_nstime2timestr (seg->starttime, stime, ISOMONTHDAY, NANO_MICRO_NONE) == NULL)
@@ -2229,7 +2143,7 @@ local_mstl_printtracelist (MS3TraceList *mstl, flag timeformat)
       }
     }
 
-    secid = secid->next;
+    secid = secid->next[0];
   }
 } /* End of local_mst_printtracelist() */
 

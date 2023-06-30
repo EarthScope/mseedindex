@@ -1,5 +1,6 @@
 2023.180:
 	- Re-organize JSON output schema.
+	- Calculate SHA-256 for all read per-file data, include in JSON output.
 	- Add option -snd to skip non-miniSEED, otherwise exit if encountered.
 	- When input is stdin, set "mod time" to 0, do not include in JSON.
 	- Update to libmseed 3.0.15 and embedded yyjson library.

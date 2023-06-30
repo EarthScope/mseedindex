@@ -6,7 +6,7 @@
 
 BIN = mseedindex
 
-SRCS = mseedindex.c md5.c ../sqlite/sqlite3.c
+SRCS = mseedindex.c md5.c sha256.c ../sqlite/sqlite3.c
 OBJS = $(SRCS:.c=.o)
 
 # Required compiler parameters

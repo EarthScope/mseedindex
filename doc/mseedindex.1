@@ -105,7 +105,9 @@ Be more verbose.  This flag can be used multiple times ("-v -v" or
 .IP "-snd       "
 Skip non-miniSEED data.  Useful if indexing files that contain miniSEED
 but also otherdata, e.g. full SEED volumes.  Otherwise, the program
-will exit when un-recognized data are encountered.
+will exit when un-recognized data are encountered.  If this option is
+used and data are skipped the calculated SHA-256 will not represent
+all data in the file.
 
 .IP "-ns        "
 No synchronization.  Read miniSEED, determine data representation but

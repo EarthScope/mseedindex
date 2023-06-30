@@ -110,6 +110,7 @@
 #endif
 
 #include "md5.h"
+#include "sha256.h"
 
 #define VERSION "3.0.0DEV"
 #define PACKAGE "mseedindex"
@@ -165,6 +166,8 @@ struct filelink
   time_t scantime;
   nstime_t earliest;
   nstime_t latest;
+  struct sha256_buff sha256state;
+  char sha256str[65];
   int localpath;
   MS3TraceList *mstl;
   struct filelink *next;
@@ -330,6 +333,8 @@ main (int argc, char **argv)
         }
 
         md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
+
+        sha256_update (&(flp->sha256state), msr->record, msr->reclen);
       }
       /* Otherwise create a new section ID */
       else
@@ -409,6 +414,8 @@ main (int argc, char **argv)
         memset (&(sd->digeststate), 0, sizeof (md5_state_t));
         md5_init (&(sd->digeststate));
         md5_append (&(sd->digeststate), (const md5_byte_t *)msr->record, msr->reclen);
+
+        sha256_update (&(flp->sha256state), msr->record, msr->reclen);
       }
 
       nextfilepos = filepos + msr->reclen;
@@ -436,7 +443,7 @@ main (int argc, char **argv)
     flp = flp->next;
   } /* End of looping over file list for reading */
 
-  /* Create all MD5 digest strings and track file extents */
+  /* Create all MD5 and SHA-256 digest strings and track file extents */
   flp = filelist;
   while (flp)
   {
@@ -447,7 +454,7 @@ main (int argc, char **argv)
     {
       if ((sd = (struct sectiondetails *)secid->prvtptr))
       {
-        /* Calculate MD5 digest and create string representation */
+        /* Calculate section-level MD5 digest and create string representation */
         md5_finish (&(sd->digeststate), digest);
         for (int idx = 0; idx < 16; idx++)
           sprintf (sd->digeststr + (idx * 2), "%02x", digest[idx]);
@@ -461,6 +468,10 @@ main (int argc, char **argv)
 
       secid = secid->next[0];
     }
+
+    /* Calculate file-level SHA-256 and create string representation */
+    sha256_finalize (&(flp->sha256state));
+    sha256_read_hex (&(flp->sha256state), flp->sha256str);
 
     flp = flp->next;
   }
@@ -1986,6 +1997,7 @@ OutputJSON (const char *filename)
       formatstr = "application/vnd.fdsn.mseed";
 
     yyjson_mut_ptr_add (pathobj, "/content_type", yyjson_mut_str (rootdoc, formatstr), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/sha256", yyjson_mut_str (rootdoc, flp->sha256str), rootdoc);
 
     if (flp->filemodtime)
     {
@@ -2378,6 +2390,7 @@ AddFile (char *filename)
   newlp->mstl = NULL;
   newlp->earliest = NSTERROR;
   newlp->latest = NSTERROR;
+  sha256_init (&newlp->sha256state);
   newlp->localpath = 0;
   newlp->next = NULL;
 

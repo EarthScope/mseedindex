@@ -1,3 +1,6 @@
+2023.188:
+	- Fix the addition of strings in the JSON output.
+
 2023.180:
 	- Re-organize JSON output schema.
 	- Calculate SHA-256 for all read per-file data, include in JSON output.

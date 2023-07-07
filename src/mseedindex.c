@@ -112,7 +112,7 @@
 #include "md5.h"
 #include "sha256.h"
 
-#define VERSION "3.0.1"
+#define VERSION "3.0.2"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1877,7 +1877,7 @@ OutputJSON (const char *filename)
   while (flp)
   {
     /* Add root key and object for path entry */
-    pathkey = yyjson_mut_str (rootdoc, flp->filename);
+    pathkey = yyjson_mut_strcpy (rootdoc, flp->filename);
     pathobj = yyjson_mut_obj (rootdoc);
     yyjson_mut_obj_add (root, pathkey, pathobj);
 
@@ -1911,22 +1911,22 @@ OutputJSON (const char *filename)
       /* Create and populate content array object entry */
       content = yyjson_mut_obj (rootdoc);
 
-      yyjson_mut_ptr_add (content, "/source_id", yyjson_mut_str (rootdoc, secid->sid), rootdoc);
+      yyjson_mut_ptr_add (content, "/source_id", yyjson_mut_strcpy (rootdoc, secid->sid), rootdoc);
 
       /* Create earliest and latest and other time strings */
       ms_nstime2timestr (sd->earliest, earliest, ISOMONTHDAY_Z, NANO_MICRO);
       ms_nstime2timestr (sd->latest, latest, ISOMONTHDAY_Z, NANO_MICRO);
       ms_nstime2timestr (MS_EPOCH2NSTIME(sd->updated), updated, ISOMONTHDAY_Z, NONE);
 
-      yyjson_mut_ptr_add (content, "/start", yyjson_mut_str (rootdoc, earliest), rootdoc);
-      yyjson_mut_ptr_add (content, "/end", yyjson_mut_str (rootdoc, latest), rootdoc);
-      yyjson_mut_ptr_add (content, "/updated", yyjson_mut_str (rootdoc, updated), rootdoc);
+      yyjson_mut_ptr_add (content, "/start", yyjson_mut_strcpy (rootdoc, earliest), rootdoc);
+      yyjson_mut_ptr_add (content, "/end", yyjson_mut_strcpy (rootdoc, latest), rootdoc);
+      yyjson_mut_ptr_add (content, "/updated", yyjson_mut_strcpy (rootdoc, updated), rootdoc);
 
       yyjson_mut_ptr_add (content, "/publication_version", yyjson_mut_int (rootdoc, secid->pubversion), rootdoc);
       yyjson_mut_ptr_add (content, "/byte_offset", yyjson_mut_sint (rootdoc, sd->startoffset), rootdoc);
       yyjson_mut_ptr_add (content, "/byte_count", yyjson_mut_sint (rootdoc, bytecount), rootdoc);
 
-      yyjson_mut_ptr_add (content, "/md5", yyjson_mut_str (rootdoc, sd->digeststr), rootdoc);
+      yyjson_mut_ptr_add (content, "/md5", yyjson_mut_strcpy (rootdoc, sd->digeststr), rootdoc);
       yyjson_mut_ptr_add (content, "/time_ordered_records", yyjson_mut_bool (rootdoc, sd->timeorderrecords), rootdoc);
 
       /* If time index includes the earliest data first create the time index array:
@@ -1996,23 +1996,23 @@ OutputJSON (const char *filename)
     else
       formatstr = "application/vnd.fdsn.mseed";
 
-    yyjson_mut_ptr_add (pathobj, "/content_type", yyjson_mut_str (rootdoc, formatstr), rootdoc);
-    yyjson_mut_ptr_add (pathobj, "/sha256", yyjson_mut_str (rootdoc, flp->sha256str), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/content_type", yyjson_mut_strcpy (rootdoc, formatstr), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/sha256", yyjson_mut_strcpy (rootdoc, flp->sha256str), rootdoc);
 
     if (flp->filemodtime)
     {
       ms_nstime2timestr (MS_EPOCH2NSTIME (flp->filemodtime), pathmod, ISOMONTHDAY_Z, NONE);
-      yyjson_mut_ptr_add (pathobj, "/path_modtime", yyjson_mut_str (rootdoc, pathmod), rootdoc);
+      yyjson_mut_ptr_add (pathobj, "/path_modtime", yyjson_mut_strcpy (rootdoc, pathmod), rootdoc);
     }
 
     ms_nstime2timestr (MS_EPOCH2NSTIME (flp->scantime), scanned, ISOMONTHDAY_Z, NONE);
-    yyjson_mut_ptr_add (pathobj, "/path_indextime", yyjson_mut_str (rootdoc, scanned), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/path_indextime", yyjson_mut_strcpy (rootdoc, scanned), rootdoc);
 
     ms_nstime2timestr (earliest_ts, earliest, ISOMONTHDAY_Z, NANO_MICRO);
     ms_nstime2timestr (latest_ts, latest, ISOMONTHDAY_Z, NANO_MICRO);
 
-    yyjson_mut_ptr_add (pathobj, "/start", yyjson_mut_str (rootdoc, earliest), rootdoc);
-    yyjson_mut_ptr_add (pathobj, "/end", yyjson_mut_str (rootdoc, latest), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/start", yyjson_mut_strcpy (rootdoc, earliest), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/end", yyjson_mut_strcpy (rootdoc, latest), rootdoc);
 
     /* Add content object to content array */
     yyjson_mut_ptr_add (pathobj, "/content", content_arr, rootdoc);

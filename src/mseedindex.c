@@ -179,8 +179,8 @@ struct filelink *filelisttail = NULL;
 static double timetol = -1.0;     /* Time tolerance for continuous traces */
 static double sampratetol = -1.0; /* Sample rate tolerance for continuous traces */
 static MS3Tolerance tolerance = { .time = NULL, .samprate = NULL };
-double timetol_callback (MS3Record *msr) { return timetol; }
-double samprate_callback (MS3Record *msr) { return sampratetol; }
+double timetol_callback (const MS3Record *msr) { return timetol; }
+double samprate_callback (const MS3Record *msr) { return sampratetol; }
 
 struct timeindex *AddTimeIndex (struct timeindex **tindex, nstime_t time, int64_t byteoffset);
 #ifdef WITHPOSTGRESQL

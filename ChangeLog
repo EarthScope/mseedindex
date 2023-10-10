@@ -1,5 +1,6 @@
 2023.283:
 	- Update libmseed to v3.0.17.
+	- Update sqlite to v3.43.2.
 
 2023.188:
 	- Fix the addition of strings in the JSON output.

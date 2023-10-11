@@ -1,4 +1,4 @@
-.TH MSEEDINDEX 1 2022/07/19
+.TH MSEEDINDEX 1 2023/10/10 "EarthScope Data Services" "EarthScope Data Services"
 .SH NAME
 Synchronize miniSEED summary and index with database
 
@@ -11,7 +11,8 @@ mseedindex [options] file1 [file2 file3 ...]
 \fBmseedindex\fP reads miniSEED, determines contiguous data sections
 of time series (same network, station, location, channel and version)
 and optionally synchronizes information about each data section with a
-database.
+database and/or generates a JSON-formatted file of the index
+information.
 
 The location of a given section is represented in the database as
 starting at a byte offset in a file and a count of bytes that follow.
@@ -41,9 +42,6 @@ databases.  When using Postgres the specified table is expected to
 exist.  When using SQLite both the database file and table will be
 created as needed, along with some indexes on common fields.
 
-When an input file is full SEED including both SEED headers and data
-records all of the headers will be skipped.
-
 .SH FILE VERSIONING
 During synchronization, all existing rows associated with the file
 being scanned will be deleted and new rows representing the current
@@ -72,11 +70,11 @@ The original and replacement file must contain data that is within
 1 day of overlapping.
 
 These features combined mean that a data file can be "replaced" by
-creating a new version of the file and scanning it without ever
+creating a new version of the file and scanning it without
 interrupting concurrent data extraction.  After replacement, another
 process can later remove the older version of the file.
 
-Once consequence is that no file names should contain a \fB#\fP
+One consequence is that no file names should contain a \fB#\fP
 character other than to designate a file version.
 
 .SH DATA SECTION UPDATE TIME
@@ -141,9 +139,6 @@ Specify the sub-indexing interval in seconds, default is 3600 (1 hour).
 This parameter controls how often a time index is created with an
 otherwise contiguous data section.
 
-.IP "-table \fItablename\fP"
-Specify the database table name, default value is 'tsindex'.
-
 .IP "-pghost \fIhostname\fP"
 Specify the Postgres database host name.
 
@@ -153,6 +148,9 @@ e.g. 'timeseries.sqlite'.
 
 .IP "-json \fIfile\fP"
 Specify file to write JSON-formatted index information.
+
+.IP "-table \fItablename\fP"
+Specify the database table name, default value is 'tsindex'.
 
 .IP "-dbport \fIport\fP"
 Specify the database host name, default: 5432.

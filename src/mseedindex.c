@@ -1,8 +1,10 @@
 /***************************************************************************
- * mseedindex.c - Synchronize miniSEED with database schema
+ * mseedindex.c - Synchronize miniSEED with database schema or produce
+ * JSON-formatted index information.
  *
  * Opens user specified file(s), parses the miniSEED records and
- * synchronizes a time series summary with a database.
+ * synchronizes a time series summary with a database or output index
+ * information to JSON format.
  *
  * PostgreSQL and SQLite3 are supported as target databases.  When
  * using Postgres the target table is expected to exist.  When using
@@ -35,8 +37,8 @@
  * station      character text
  * location     character text
  * channel      character text
- * quality      character text
- * version      smallint,
+ * quality      character text -- Legacy field replaced by version, unpopulated
+ * version      smallint,      -- Publication version
  * starttime    timestamp with time zone -- Earliest sample time
  * endtime      timestamp with time zone -- Latest sample time
  * samplerate   numeric
@@ -60,8 +62,8 @@
  * station      TEXT
  * location     TEXT
  * channel      TEXT
- * quality      TEXT
- * version      INTEGER
+ * quality      TEXT   -- Legacy field replaced by version, unpopulated
+ * version      INTEGER -- Publication version
  * starttime    TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS.ssssss
  * endtime      TEXT   -- Date-time in format YYYY-MM-DDTHH:MM:SS.ssssss
  * samplerate   REAL
@@ -112,7 +114,7 @@
 #include "md5.h"
 #include "sha256.h"
 
-#define VERSION "3.0.2"
+#define VERSION "3.0.3"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -781,7 +783,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
         /* Fields: 0=network,1=station,2=location,3=channel,4=version,5=hash,6=updated */
         for (idx = 0; idx < matchcount; idx++)
         {
-          secid = flp->mstl->traces;
+          secid = flp->mstl->traces.next[0];
           while (secid)
           {
             if ((sd = (struct sectiondetails *)secid->prvtptr))
@@ -811,7 +813,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
                         }
             }
 
-            secid = secid->next;
+            secid = secid->next[0];
           }
         }
       }
@@ -851,7 +853,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
   }
 
   /* Loop through trace list, synchronizing with database */
-  secid = flp->mstl->traces;
+  secid = flp->mstl->traces.next[0];
   while (secid)
   {
     char secnetwork[11];
@@ -930,7 +932,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       char *spansstr = NULL;
       char *ratesstr = NULL;
 
-      id = sd->spans->traces;
+      id = sd->spans->traces.next[0];
       while (id)
       {
         /* Create the time spans array:
@@ -971,7 +973,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
           }
         }
 
-        id = id->next;
+        id = id->next[0];
       }
 
       /* Add Array declaration to timespans for the database */
@@ -1069,7 +1071,7 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
       timeratesstr = NULL;
     }
 
-    secid = secid->next;
+    secid = secid->next[0];
   }
 
   /* End the transaction */

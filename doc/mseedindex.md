@@ -18,7 +18,7 @@ mseedindex [options] file1 [file2 file3 ...]
 
 ## <a id='description'>Description</a>
 
-<p ><b>mseedindex</b> reads miniSEED, determines contiguous data sections of time series (same network, station, location, channel and version) and optionally synchronizes information about each data section with a database.</p>
+<p ><b>mseedindex</b> reads miniSEED, determines contiguous data sections of time series (same network, station, location, channel and version) and optionally synchronizes information about each data section with a database and/or generates a JSON-formatted file of the index information.</p>
 
 <p >The location of a given section is represented in the database as starting at a byte offset in a file and a count of bytes that follow. Each section of data is a row in the schema.</p>
 
@@ -29,8 +29,6 @@ mseedindex [options] file1 [file2 file3 ...]
 <p >Any existing rows in the database that match the file being synchronized will be replaced during synchronization, assuming the original and replacement files contain data that is within 1 day of overlapping.  This operation is done as a database transaction containing all deletions and all insertions.  See <b>FILE VERSIONING</b> for a description of how to avoid race conditions while simultaneously updating data files and extracting data.</p>
 
 <p >PostgreSQL (version >= 9.1) and SQLite3 are supported as target databases.  When using Postgres the specified table is expected to exist.  When using SQLite both the database file and table will be created as needed, along with some indexes on common fields.</p>
-
-<p >When an input file is full SEED including both SEED headers and data records all of the headers will be skipped.</p>
 
 ## <a id='file-versioning'>File Versioning</a>
 
@@ -48,9 +46,9 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p >If a file name contains this version information <b>mseedindex</b> will search for existing rows in the database that match everything but the version, e.g. <b>filename like /path/to/data.file%</b> in SQL. The original and replacement file must contain data that is within 1 day of overlapping.</p>
 
-<p >These features combined mean that a data file can be "replaced" by creating a new version of the file and scanning it without ever interrupting concurrent data extraction.  After replacement, another process can later remove the older version of the file.</p>
+<p >These features combined mean that a data file can be "replaced" by creating a new version of the file and scanning it without interrupting concurrent data extraction.  After replacement, another process can later remove the older version of the file.</p>
 
-<p >Once consequence is that no file names should contain a <b>#</b> character other than to designate a file version.</p>
+<p >One consequence is that no file names should contain a <b>#</b> character other than to designate a file version.</p>
 
 ## <a id='data-section-update-time'>Data Section Update Time</a>
 
@@ -71,6 +69,10 @@ mseedindex [options] file1 [file2 file3 ...]
 <b>-v</b>
 
 <p style="padding-left: 30px;">Be more verbose.  This flag can be used multiple times ("-v -v" or "-vv") for more verbosity.</p>
+
+<b>-snd</b>
+
+<p style="padding-left: 30px;">Skip non-miniSEED data.  Useful if indexing files that contain miniSEED but also otherdata, e.g. full SEED volumes.  Otherwise, the program will exit when un-recognized data are encountered.  If this option is used and data are skipped the calculated SHA-256 will not represent all data in the file.</p>
 
 <b>-ns</b>
 
@@ -96,10 +98,6 @@ mseedindex [options] file1 [file2 file3 ...]
 
 <p style="padding-left: 30px;">Specify the sub-indexing interval in seconds, default is 3600 (1 hour). This parameter controls how often a time index is created with an otherwise contiguous data section.</p>
 
-<b>-table </b><i>tablename</i>
-
-<p style="padding-left: 30px;">Specify the database table name, default value is 'tsindex'.</p>
-
 <b>-pghost </b><i>hostname</i>
 
 <p style="padding-left: 30px;">Specify the Postgres database host name.</p>
@@ -111,6 +109,10 @@ mseedindex [options] file1 [file2 file3 ...]
 <b>-json </b><i>file</i>
 
 <p style="padding-left: 30px;">Specify file to write JSON-formatted index information.</p>
+
+<b>-table </b><i>tablename</i>
+
+<p style="padding-left: 30px;">Specify the database table name, default value is 'tsindex'.</p>
 
 <b>-dbport </b><i>port</i>
 
@@ -154,20 +156,18 @@ data/day3.mseed
 
 ## <a id='leap-second-list-file'>Leap Second List File</a>
 
+<p >NOTE: A list of leap seconds is included in the program and no external list should be needed unless a leap second is added after year 2023.</p>
+
 <p >If the environment variable LIBMSEED_LEAPSECOND_FILE is set it is expected to indicate a file containing a list of leap seconds as published by NIST and IETF, usually available here: https://www.ietf.org/timezones/data/leap-seconds.list</p>
 
-<p >Specifying this file is highly recommended.</p>
-
 <p >If present, the leap seconds listed in this file will be used to adjust the time coverage for records that contain a leap second. Also, leap second indicators in the miniSEED headers will be ignored.</p>
-
-<p >To suppress the warning printed by <b>mseedindex</b> without specifying a leap second file, set LIBMSEED_LEAPSECOND_FILE=NONE.</p>
 
 ## <a id='author'>Author</a>
 
 <pre >
 Chad Trabant
-IRIS Data Management Center
+EarthScope Data Services
 </pre>
 
 
-(man page 2022/07/19)
+(man page 2023/10/10)

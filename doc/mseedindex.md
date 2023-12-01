@@ -158,7 +158,7 @@ data/day3.mseed
 
 <p >NOTE: A list of leap seconds is included in the program and no external list should be needed unless a leap second is added after year 2023.</p>
 
-<p >If the environment variable LIBMSEED_LEAPSECOND_FILE is set it is expected to indicate a file containing a list of leap seconds as published by NIST and IETF, usually available here: https://www.ietf.org/timezones/data/leap-seconds.list</p>
+<p >If the environment variable LIBMSEED_LEAPSECOND_FILE is set it is expected to indicate a file containing a list of leap seconds in NTP format.  Some locations where this file can be obtained are indicated in RFC 8633 section 3.7: https://www.rfc-editor.org/rfc/rfc8633.html#section-3.7</p>
 
 <p >If present, the leap seconds listed in this file will be used to adjust the time coverage for records that contain a leap second. Also, leap second indicators in the miniSEED headers will be ignored.</p>
 

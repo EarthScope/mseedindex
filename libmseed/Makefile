@@ -9,7 +9,7 @@
 # Extract version from libmseed.h, expected line should include LIBMSEED_VERSION "#.#.#"
 MAJOR_VER = $(shell grep LIBMSEED_VERSION libmseed.h | grep -Eo '[0-9]+.[0-9]+.[0-9]+' | cut -d . -f 1)
 FULL_VER = $(shell grep LIBMSEED_VERSION libmseed.h | grep -Eo '[0-9]+.[0-9]+.[0-9]+')
-COMPAT_VER = $(MAJOR_VER).0.0
+COMPAT_VER = $(MAJOR_VER).1.0
 
 # Default settings for install target
 PREFIX ?= /usr/local
@@ -75,7 +75,7 @@ $(LIB_SO): $(LIB_LOBJS)
 	ln -s $(LIB_SO) $(LIB_SO_BASE)
 	ln -s $(LIB_SO) $(LIB_SO_MAJOR)
 
-test check: static FORCE
+test tests check: static FORCE
 	@$(MAKE) -C test test
 
 example: static FORCE

@@ -3,7 +3,7 @@
  *
  * This file is part of the miniSEED Library.
  *
- * Copyright (c) 2023 Chad Trabant, EarthScope Data Services
+ * Copyright (c) 2024 Chad Trabant, EarthScope Data Services
  *
  * Licensed under the Apache License, Version 2.0 (the "License");
  * you may not use this file except in compliance with the License.
@@ -124,7 +124,7 @@ msr3_duplicate (const MS3Record *msr, int8_t datadup)
 
   if (!msr)
   {
-    ms_log (2, "Required argument not defined: 'msr'\n");
+    ms_log (2, "%s(): Required input not defined: 'msr'\n", __func__);
     return NULL;
   }
 
@@ -273,7 +273,7 @@ msr3_print (const MS3Record *msr, int8_t details)
     ms_log (0, "    extra header length: %d bytes\n", msr->extralength);
     ms_log (0, "    data payload length: %d bytes\n", msr->datalength);
     ms_log (0, "       payload encoding: %s (val: %d)\n",
-            (char *)ms_encodingstr (msr->encoding), msr->encoding);
+            (char *)ms_encodingstr ((uint8_t)msr->encoding), msr->encoding);
 
     if (details > 1 && msr->extralength > 0 && msr->extra)
     {
@@ -309,7 +309,7 @@ msr3_resize_buffer (MS3Record *msr)
 
   if (!msr)
   {
-    ms_log (2, "Required argument not defined: 'msr'\n");
+    ms_log (2, "%s(): Required input not defined: 'msr'\n", __func__);
     return MS_GENERROR;
   }
 
@@ -365,7 +365,7 @@ msr3_sampratehz (const MS3Record *msr)
  * Double precision is returned, but the true precision is dependent
  * on the accuracy of the host system clock among other things.
  *
- * @param[in] msr ::MS3Record to calculate lactency for
+ * @param[in] msr ::MS3Record to calculate latency for
  *
  * @returns seconds of latency or 0.0 on error (indistinguishable from
  * 0.0 latency).

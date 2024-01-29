@@ -1,3 +1,6 @@
+2024.029:
+	- Update libmseed to v3.1.1.
+
 2023.283:
 	- Update libmseed to v3.0.17.
 	- Update sqlite to v3.43.2.

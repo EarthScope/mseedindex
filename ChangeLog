@@ -1,4 +1,6 @@
-2024.029:
+2024.031: 3.0.4
+	- Add WITHOUTURL build variable to disable building with URL support.
+	- Prefer /usr/bin/curl-config over any other curl-config.
 	- Update libmseed to v3.1.1.
 
 2023.283:

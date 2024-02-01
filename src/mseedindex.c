@@ -114,7 +114,7 @@
 #include "md5.h"
 #include "sha256.h"
 
-#define VERSION "3.0.3"
+#define VERSION "3.0.4"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;

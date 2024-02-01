@@ -1,8 +1,9 @@
-# mseedindex - Synchronize miniSEED with database
+# mseedindex - Generate miniSEED summary and synchronize database
 
 This program reads miniSEED files, creates an index of the available
-data and stores this information into a database.  The index includes
-details such as identifers, time ranges, file names, location within files,
+data and stores this information into a database.  Alternatively, the index
+information can be produced in JSON format. The index includes details
+such as identifers, time ranges, file names, location within files,
 and additional details.  The database can be either
 [PostgreSQL](https://www.postgres.org) or
 [SQLite](https://www.sqlite.org/).
@@ -28,7 +29,7 @@ system is designed for GNU make, which make be avilable as 'gmake'.
 The CC, CFLAGS and LDFLAGS environment variables can be used to configure
 the build parameters.
 
-To build _with_ PostgreSQL support set the variable WITHPOSTGRESQL.
+To build _with_ PostgreSQL support set the variable `WITHPOSTGRESQL`.
 This can be done in a single command with make like:
 $ WITHPOSTGRESQL=1 make
 
@@ -36,6 +37,12 @@ If Postgres is installed in non-system locations, specific their location
 using the `CFLAGS` and `LDFLAGS` environment variables:
 * CFLAGS='-I/Library/PostgreSQL/14/include'
 * LDFLAGS='-L/Library/PostgreSQL/14/lib/'
+
+By default the build system will detect if necessary libraries are available
+for URL support and enable this capability.  To build _without_ support for
+reading URLs set the variable `WIHOUTURL`.  This can be done in a single
+command with make like:
+$ WITHOUTURL=1 make
 
 For further installation simply copy the resulting binary and man page
 (in the 'doc' directory) to appropriate system directories.
@@ -58,4 +65,4 @@ WITHOUT WARRANTIES OR CONDITIONS OF ANY KIND, either express or implied.
 See the License for the specific language governing permissions and
 limitations under the License.
 
-Copyright (C) 2023 Chad Trabant, EarthScope Data Services
+Copyright (C) 2024 Chad Trabant, EarthScope Data Services

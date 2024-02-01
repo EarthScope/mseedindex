@@ -1,0 +1,55 @@
+[build-system]
+requires = ["hatchling>=1.21.0"]
+build-backend = "hatchling.build"
+
+[project]
+name = "mseedindex"
+description = "A Python package entry for building the C-based mseedindex program"
+authors = [
+    { name = "EarthScope Data Services", email = "software@earthscope.org" },
+]
+readme = "README.md"
+requires-python = ">=3.8"
+keywords = ["seismology", "miniseed", "mseed", "data", "waveform", "seismic"]
+license = { text = "Apache-2.0" }
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "License :: OSI Approved :: Apache Software License",
+    "Intended Audience :: Science/Research",
+    "Topic :: Scientific/Engineering",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: POSIX :: Other",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+]
+dynamic = ["version"]
+
+[project.urls]
+Homepage = "https://github.com/EarthScope/mseedindex"
+Issues = "https://github.com/EarthScope/mseedindex/issues"
+
+[project.scripts]
+mseedindex = "mseedindex.__main__:main"
+
+[tool.hatch.version]
+path = "src/mseedindex.c"
+pattern = "#define\\s+VERSION\\s+\"(?P<version>[^\"]+)\""
+
+[tool.hatch.build]
+exclude = [
+    "libmseed/test/*",
+    "libmseed/doc/*",
+    "libmseed/example/*",
+]
+
+[tool.hatch.build.targets.wheel.hooks.custom]
+path = "python/hatch_build_mseedindex.py"
+
+[tool.hatch.build.targets.wheel]
+exclude = ['libmseed']
+packages = ["mseedindex"]
+
+[tool.hatch.build.targets.wheel.force-include]
+"mseedindex" = "mseedindex/mseedindex"
+"python/__main__.py" = "mseedindex/__main__.py"

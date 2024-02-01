@@ -1,0 +1,36 @@
+# Byte-compiled / optimized / DLL files
+__pycache__/
+*.py[cod]
+
+# C build objects
+*.so
+*.lo
+*.o
+*.dylib
+*.so
+*.dll
+
+# Distribution / packaging
+build/
+develop-eggs/
+dist/
+eggs/
+parts/
+sdist/
+var/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Installer logs
+pip-log.txt
+pip-delete-this-directory.txt
+
+# Sphinx documentation
+docs/_build/
+
+# Development environment
+dev/
+TODO
+*.mseed
+

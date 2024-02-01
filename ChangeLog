@@ -1,6 +1,7 @@
-2024.031: 3.0.4
+2024.032: 3.0.4
 	- Add WITHOUTURL build variable to disable building with URL support.
 	- Prefer /usr/bin/curl-config over any other curl-config.
+	- Replace setup.py with pyproject.toml for PyPI building hook.
 	- Update libmseed to v3.1.1.
 
 2023.283:

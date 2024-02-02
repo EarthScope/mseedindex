@@ -1,9 +1,9 @@
-#!/usr/bin/env python
+#!/usr/bin/env python3
 #
 # fetchIndexInfo.py: Fetch time series index information.
 # Reference: https://github.com/iris-edu/mseedindex/wiki
 #
-# Read an IRIS time series index table in an SQLite3 database and print
+# Read an EarthScope time series index table in an SQLite3 database and print
 # readable details of the index entries, alternatively a SYNC-style
 # listing can be printed.
 #
@@ -26,10 +26,9 @@
 #   a) resolve wildcards, allowing the use of '=' operator and thus table index
 #   b) reduce index table search to channels that are known to be present
 #
-# Modified: 2017.132
-# Written by Chad Trabant, IRIS Data Management Center
+# Modified: 2024.032
+# Written by Chad Trabant, EarthScope Data Services
 
-from __future__ import print_function
 from collections import namedtuple
 import threading
 import time
@@ -41,7 +40,7 @@ import re
 import datetime
 import sqlite3
 
-version = '1.5'
+version = '1.6'
 verbose = 0
 table = 'tsindex'
 dbconn = None
@@ -307,7 +306,7 @@ def fetch_index_by_request(cursor, table, request, filename):
         for req in request:
             # Replace "--" location ID request alias with true empty value
             if req[2] == "--":
-                req[2] = "";
+                req[2] = ""
 
             cursor.execute("INSERT INTO request (network,station,location,channel,starttime,endtime) "
                            "VALUES (?,?,?,?,?,?) ", req)
@@ -350,7 +349,7 @@ def fetch_index_by_request(cursor, table, request, filename):
             cursor.execute("UPDATE request SET starttime='0000-00-00T00:00:00' WHERE starttime='*'")
             cursor.execute("UPDATE request SET endtime='5000-00-00T00:00:00' WHERE endtime='*'")
 
-    # Fetch final results by joining reqeust and index table
+    # Fetch final results by joining request and index table
     try:
         if verbose >= 2:
             print ("Fetching index entries")
@@ -376,7 +375,7 @@ def fetch_index_by_request(cursor, table, request, filename):
                      "  AND ts.location {1} r.location "
                      "  AND ts.channel {1} r.channel "
                      "  AND ts.starttime <= r.endtime "
-                     "  AND ts.starttime >= datetime(r.starttime,'-{2} days') "
+                     "  AND (r.starttime < 1 OR ts.starttime >= datetime(r.starttime,'-{2} days')) "
                      "  AND ts.endtime >= r.starttime "
                      .format(table, "GLOB" if wildcards else "=", maxsectiondays))
 
@@ -562,7 +561,7 @@ def print_info(index_rows):
 
             # Convert epoch times to nicer format
             if re.match ("^[+-]?\d+(>?\.\d+)?$", time.strip()):
-                time = datetime.datetime.utcfromtimestamp(float(time)).isoformat(' ')
+                time = timestamp_to_isoZ(time)
 
             print ("  {0} => {1}".format(time,offset))
 
@@ -577,12 +576,12 @@ def print_info(index_rows):
             for idx, span in enumerate(NRow.timespans.split(',')):
                 (start,end) = span.lstrip('[').rstrip(']').split(':')
                 if rates:
-                    print ("  {0} - {1} ({2})".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
-                                                      datetime.datetime.utcfromtimestamp(float(end)).isoformat(' '),
+                    print ("  {0} - {1} ({2})".format(timestamp_to_isoZ(start),
+                                                      timestamp_to_isoZ(end),
                                                       rates[idx]))
                 else:
-                    print ("  {0} - {1}".format(datetime.datetime.utcfromtimestamp(float(start)).isoformat(' '),
-                                                datetime.datetime.utcfromtimestamp(float(end)).isoformat(' ')))
+                    print ("  {0} - {1}".format(timestamp_to_isoZ(start),
+                                                timestamp_to_isoZ(end)))
 
     return
 
@@ -636,6 +635,11 @@ def normalize_datetime(timestring):
 
     # Rebuild into target format
     return datetime.datetime(*timepieces).strftime("%Y-%m-%dT%H:%M:%S.%f")
+
+def timestamp_to_isoZ(timestamp):
+    '''Convert epoch timestamp to ISO8601 format with Z
+    '''
+    return datetime.datetime.utcfromtimestamp(float(timestamp)).isoformat() + "Z"
 
 def usage():
     '''Print usage message
@@ -693,5 +697,5 @@ if __name__ == "__main__":
     except Exception as err:
         print (err)
 
-    while mainthread.isAlive():
+    while mainthread.is_alive():
        time.sleep(0.2)

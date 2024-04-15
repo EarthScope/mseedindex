@@ -1,3 +1,7 @@
+2024.106: 3.0.5
+	- Change timestamps in JSON output to nanosecond epoch values to retain
+	nanosecond resolution.  Add formatted date-time strings for summary values.
+
 2024.032: 3.0.4
 	- Add WITHOUTURL build variable to disable building with URL support.
 	- Prefer /usr/bin/curl-config over any other curl-config.

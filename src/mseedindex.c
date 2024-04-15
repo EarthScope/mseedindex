@@ -114,7 +114,7 @@
 #include "md5.h"
 #include "sha256.h"
 
-#define VERSION "3.0.4"
+#define VERSION "3.0.5"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -1825,8 +1825,8 @@ OutputJSON (const char *filename)
   int64_t bytecount;
   nstime_t earliest_ts = NSTUNSET;
   nstime_t latest_ts = NSTUNSET;
-  char earliest[64];
-  char latest[64];
+  char start_string[64];
+  char end_string[64];
   char pathmod[64];
   char updated[64];
   char scanned[64];
@@ -1915,13 +1915,15 @@ OutputJSON (const char *filename)
 
       yyjson_mut_ptr_add (content, "/source_id", yyjson_mut_strcpy (rootdoc, secid->sid), rootdoc);
 
-      /* Create earliest and latest and other time strings */
-      ms_nstime2timestr (sd->earliest, earliest, ISOMONTHDAY_Z, NANO_MICRO);
-      ms_nstime2timestr (sd->latest, latest, ISOMONTHDAY_Z, NANO_MICRO);
+      /* Create start and end and other time strings */
+      ms_nstime2timestr (sd->earliest, start_string, ISOMONTHDAY_Z, NANO_MICRO);
+      ms_nstime2timestr (sd->latest, end_string, ISOMONTHDAY_Z, NANO_MICRO);
       ms_nstime2timestr (MS_EPOCH2NSTIME(sd->updated), updated, ISOMONTHDAY_Z, NONE);
 
-      yyjson_mut_ptr_add (content, "/start", yyjson_mut_strcpy (rootdoc, earliest), rootdoc);
-      yyjson_mut_ptr_add (content, "/end", yyjson_mut_strcpy (rootdoc, latest), rootdoc);
+      yyjson_mut_ptr_add (content, "/start_string", yyjson_mut_strcpy (rootdoc, start_string), rootdoc);
+      yyjson_mut_ptr_add (content, "/end_string", yyjson_mut_strcpy (rootdoc, end_string), rootdoc);
+      yyjson_mut_ptr_add (content, "/start", yyjson_mut_sint (rootdoc, sd->earliest), rootdoc);
+      yyjson_mut_ptr_add (content, "/end", yyjson_mut_sint (rootdoc, sd->latest), rootdoc);
       yyjson_mut_ptr_add (content, "/updated", yyjson_mut_strcpy (rootdoc, updated), rootdoc);
 
       yyjson_mut_ptr_add (content, "/publication_version", yyjson_mut_int (rootdoc, secid->pubversion), rootdoc);
@@ -1945,7 +1947,7 @@ OutputJSON (const char *filename)
         {
           obj = yyjson_mut_obj (rootdoc);
 
-          yyjson_mut_ptr_add (obj, "/timestamp", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(tindex->time)), rootdoc);
+          yyjson_mut_ptr_add (obj, "/timestamp", yyjson_mut_sint (rootdoc, tindex->time), rootdoc);
           yyjson_mut_ptr_add (obj, "/offset", yyjson_mut_sint (rootdoc, tindex->byteoffset), rootdoc);
 
           yyjson_mut_ptr_add (content, "/ts_time_byteoffset/-", obj, rootdoc);
@@ -1972,8 +1974,8 @@ OutputJSON (const char *filename)
           {
             obj = yyjson_mut_obj (rootdoc);
 
-            yyjson_mut_ptr_add (obj, "/start", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(seg->starttime)), rootdoc);
-            yyjson_mut_ptr_add (obj, "/end", yyjson_mut_real (rootdoc, (double)MS_NSTIME2EPOCH(seg->endtime)), rootdoc);
+            yyjson_mut_ptr_add (obj, "/start", yyjson_mut_sint (rootdoc, seg->starttime), rootdoc);
+            yyjson_mut_ptr_add (obj, "/end", yyjson_mut_sint (rootdoc, seg->endtime), rootdoc);
             yyjson_mut_ptr_add (obj, "/sample_rate", yyjson_mut_real (rootdoc, seg->samprate), rootdoc);
 
             yyjson_mut_ptr_add (content, "/ts_timespans/-", obj, rootdoc);
@@ -2010,11 +2012,13 @@ OutputJSON (const char *filename)
     ms_nstime2timestr (MS_EPOCH2NSTIME (flp->scantime), scanned, ISOMONTHDAY_Z, NONE);
     yyjson_mut_ptr_add (pathobj, "/path_indextime", yyjson_mut_strcpy (rootdoc, scanned), rootdoc);
 
-    ms_nstime2timestr (earliest_ts, earliest, ISOMONTHDAY_Z, NANO_MICRO);
-    ms_nstime2timestr (latest_ts, latest, ISOMONTHDAY_Z, NANO_MICRO);
+    ms_nstime2timestr (earliest_ts, start_string, ISOMONTHDAY_Z, NANO_MICRO);
+    ms_nstime2timestr (latest_ts, end_string, ISOMONTHDAY_Z, NANO_MICRO);
 
-    yyjson_mut_ptr_add (pathobj, "/start", yyjson_mut_strcpy (rootdoc, earliest), rootdoc);
-    yyjson_mut_ptr_add (pathobj, "/end", yyjson_mut_strcpy (rootdoc, latest), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/start_string", yyjson_mut_strcpy (rootdoc, start_string), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/end_string", yyjson_mut_strcpy (rootdoc, end_string), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/start", yyjson_mut_sint (rootdoc, earliest_ts), rootdoc);
+    yyjson_mut_ptr_add (pathobj, "/end", yyjson_mut_sint (rootdoc, latest_ts), rootdoc);
 
     /* Add content object to content array */
     yyjson_mut_ptr_add (pathobj, "/content", content_arr, rootdoc);

@@ -12,8 +12,8 @@ BIN = ..\mseedindex.exe
 
 all: $(BIN)
 
-$(BIN):	mseedindex.obj md5.obj asprintf.obj ..\sqlite\sqlite3.obj
-	link.exe /nologo /out:$(BIN) $(LIBS) mseedindex.obj md5.obj asprintf.obj sqlite3.obj
+$(BIN):	mseedindex.obj md5.obj sha256.obj asprintf.obj ..\sqlite\sqlite3.obj
+	link.exe /nologo /out:$(BIN) $(LIBS) mseedindex.obj md5.obj sha256.obj asprintf.obj sqlite3.obj
 
 .c.obj:
         $(CC) /nologo $(CFLAGS) $(INCS) $(OPTS) /c $<

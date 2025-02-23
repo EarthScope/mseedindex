@@ -9,6 +9,10 @@ __pycache__/
 *.dylib
 *.so
 *.dll
+# C build object (Windows)
+*.obj
+*.lib
+*.exe
 
 # Distribution / packaging
 build/

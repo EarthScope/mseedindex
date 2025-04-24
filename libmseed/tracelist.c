@@ -34,6 +34,9 @@ MS3RecordPtr *mstl3_add_recordptr (MS3TraceSeg *seg, const MS3Record *msr, nstim
 static uint32_t lm_lcg_r (uint64_t *state);
 static uint8_t lm_random_height (uint8_t maximum, uint64_t *state);
 
+/* Test if two sample rates are similar using either specified tolerance (if positive) or default tolerance */
+#define IS_SAMPRATE_SIMILAR(SR1, SR2, SRT) ((SRT > 0.0) ? fabs (SR1 - SR2) > SRT : MS_ISRATETOLERABLE (SR1, SR2))
+
 /**********************************************************************/ /**
  * @brief Initialize a ::MS3TraceList container
  *
@@ -377,15 +380,12 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
   nstime_t postgap;
   nstime_t lastgap;
   nstime_t firstgap;
-  nstime_t nsdelta;
+  nstime_t nsperiod;
   nstime_t nstimetol = 0;
   nstime_t nnstimetol = 0;
 
   double sampratehz;
   double sampratetol = -1.0;
-  int8_t whence;
-  int8_t lastratecheck;
-  int8_t firstratecheck;
 
   if (!mstl || !msr)
   {
@@ -445,19 +445,14 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
   /* Add data coverage to the matching MS3TraceID */
   else
   {
-    /* Calculate high-precision sample period, handling different rate notations */
-    if (msr->samprate > 0.0)
-      nsdelta = (nstime_t) (NSTMODULUS / msr->samprate); /* samples/second */
-    else if (msr->samprate < 0.0)
-      nsdelta = (nstime_t) (NSTMODULUS * -msr->samprate); /* period */
-    else
-      nsdelta = 0;
+    /* Calculate nanosecond sample period */
+    nsperiod = msr3_nsperiod (msr);
 
     /* Calculate high-precision time tolerance */
     if (tolerance && tolerance->time)
       nstimetol = (nstime_t) (NSTMODULUS * tolerance->time (msr));
     else
-      nstimetol = (nstime_t) (0.5 * nsdelta); /* Default time tolerance is 1/2 sample period */
+      nstimetol = (nstime_t) (0.5 * nsperiod); /* Default time tolerance is 1/2 sample period */
 
     nnstimetol = (nstimetol) ? -nstimetol : 0;
 
@@ -471,22 +466,10 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
      * segment and positive when there is a time gap. */
 
     /* Gap relative to the last segment */
-    lastgap = msr->starttime - id->last->endtime - nsdelta;
+    lastgap = msr->starttime - id->last->endtime - nsperiod;
 
     /* Gap relative to the first segment */
-    firstgap = id->first->starttime - endtime - nsdelta;
-
-    /* Sample rate tolerance checks for first and last segments */
-    if (tolerance && tolerance->samprate)
-    {
-      lastratecheck = (sampratetol < 0.0 || ms_dabs (sampratehz - id->last->samprate) > sampratetol) ? 0 : 1;
-      firstratecheck = (sampratetol < 0.0 || ms_dabs (sampratehz - id->first->samprate) > sampratetol) ? 0 : 1;
-    }
-    else
-    {
-      lastratecheck = MS_ISRATETOLERABLE (sampratehz, id->last->samprate);
-      firstratecheck = MS_ISRATETOLERABLE (sampratehz, id->first->samprate);
-    }
+    firstgap = id->first->starttime - endtime - nsperiod;
 
     /* Search first for the simple scenarios in order of likelihood:
      * - Record fits at end of last segment
@@ -498,7 +481,8 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
      */
 
     /* Record coverage fits at end of last segment */
-    if (lastgap <= nstimetol && lastgap >= nnstimetol && lastratecheck)
+    if (lastgap <= nstimetol && lastgap >= nnstimetol &&
+        IS_SAMPRATE_SIMILAR (sampratehz, id->last->samprate, sampratetol))
     {
       if (!mstl3_addmsrtoseg (id->last, msr, endtime, 1))
         return NULL;
@@ -513,7 +497,7 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
         return NULL;
     }
     /* Record coverage is after all other coverage */
-    else if ((msr->starttime - nsdelta - nstimetol) > id->latest)
+    else if ((msr->starttime - nsperiod - nstimetol) > id->latest)
     {
       if (!(seg = mstl3_msr2seg (msr, endtime)))
         return NULL;
@@ -532,7 +516,7 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
         return NULL;
     }
     /* Record coverage is before all other coverage */
-    else if ((endtime + nsdelta + nstimetol) < id->earliest)
+    else if ((endtime + nsperiod + nstimetol) < id->earliest)
     {
       if (!(seg = mstl3_msr2seg (msr, endtime)))
         return NULL;
@@ -551,7 +535,8 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
         return NULL;
     }
     /* Record coverage fits at beginning of first segment */
-    else if (firstgap <= nstimetol && firstgap >= nnstimetol && firstratecheck)
+    else if (firstgap <= nstimetol && firstgap >= nnstimetol &&
+             IS_SAMPRATE_SIMILAR (sampratehz, id->first->samprate, sampratetol))
     {
       if (!mstl3_addmsrtoseg (id->first, msr, endtime, 2))
         return NULL;
@@ -568,15 +553,14 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
     /* Search complete segment list for matches */
     else
     {
+      /* This search finds the following values if they exist: */
+      segbefore = NULL; /* The first segment end that matches the record start (within tolerance) */
+      segafter  = NULL; /* The first segment start that matches the record end (within tolerance) */
+      followseg = NULL; /* The segment with latest start time before the record start */
       searchseg = id->first;
-      segbefore = NULL; /* Find segment that record fits before */
-      segafter  = NULL; /* Find segment that record fits after */
-      followseg = NULL; /* Track segment that record follows in time order */
-
       while (searchseg)
       {
-        /* Done searching if autohealing and record exactly matches
-         * a segment.
+        /* Done searching if autohealing and record exactly matches a segment.
          *
          * Rationale: autohealing would have combined this segment
          * with another if that were possible, so this record will
@@ -592,50 +576,29 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
         if (msr->starttime > searchseg->starttime)
           followseg = searchseg;
 
-        whence = 0;
-
-        postgap = msr->starttime - searchseg->endtime - nsdelta;
-        if (!segbefore && postgap <= nstimetol && postgap >= nnstimetol)
-          whence = 1;
-
-        pregap = searchseg->starttime - endtime - nsdelta;
-        if (!segafter && pregap <= nstimetol && pregap >= nnstimetol)
-          whence = 2;
-
-        if (!whence)
+        if (!segbefore)
         {
-          searchseg = searchseg->next;
-          continue;
+          postgap = msr->starttime - searchseg->endtime - nsperiod;
+
+          if (postgap <= nstimetol && postgap >= nnstimetol &&
+              IS_SAMPRATE_SIMILAR (sampratehz, searchseg->samprate, sampratetol))
+            segbefore = searchseg;
         }
 
-        if (tolerance && tolerance->samprate)
+        if (!segafter)
         {
-          if (sampratetol >= 0 && ms_dabs (sampratehz - searchseg->samprate) > sampratetol)
-          {
-            searchseg = searchseg->next;
-            continue;
-          }
-        }
-        else
-        {
-          if (!MS_ISRATETOLERABLE (sampratehz, searchseg->samprate))
-          {
-            searchseg = searchseg->next;
-            continue;
-          }
-        }
+          pregap = searchseg->starttime - endtime - nsperiod;
 
-        if (whence == 1)
-          segbefore = searchseg;
-        else
-          segafter = searchseg;
-
-        /* Done searching if not autohealing */
-        if (!autoheal)
-          break;
+          if (pregap <= nstimetol && pregap >= nnstimetol &&
+              IS_SAMPRATE_SIMILAR (sampratehz, searchseg->samprate, sampratetol))
+            segafter = searchseg;
+        }
 
         /* Done searching if both before and after segments are found */
         if (segbefore && segafter)
+          break;
+        /* Done searching if not autohealing and one match found */
+        else if (!autoheal && (segbefore || segafter))
           break;
 
         searchseg = searchseg->next;
@@ -809,6 +772,22 @@ mstl3_addmsr_recordptr (MS3TraceList *mstl, const MS3Record *msr, MS3RecordPtr *
 
     if (id->last == seg)
       id->last = segbefore;
+  }
+
+  /* Store update time at seg.prvtptr, allocate if needed */
+  if (seg && flags & MSF_PPUPDATETIME)
+  {
+    if (!seg->prvtptr)
+    {
+      if (!(seg->prvtptr = libmseed_memory.malloc (sizeof (nstime_t))))
+      {
+        ms_log (2, "Error allocating memory\n");
+        return NULL;
+      }
+    }
+
+    /* Set to current time */
+    *(nstime_t *)seg->prvtptr = lmp_systemtime ();
   }
 
   return seg;
@@ -1929,7 +1908,9 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  * record can be generated, which often leaves small amounts of data
  * in each segment buffer.  On completion or shutdown the caller
  * usually makes a final call to mst3_pack() with the ::MSF_FLUSHDATA
- * flag set to flush all data from the buffers.
+ * flag set to flush all data from the buffers.  Implementing finer
+ * control of when data records are generated, such as a time tolerance,
+ * can be done using mstraceseg3_pack() directly.
  *
  * As each record is filled and finished they are passed to \a
  * record_handler() which should expect 1) a \c char* to the record,
@@ -1942,7 +1923,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  * The requested \a encoding value is currently only used for integer
  * data samples. The encoding is set automatially for text and
  * floating point data samples as there is only a single encoding for
- * them.  A value of \c -1 can be used to request the default.
+ * them.  A value of \c -1 can be used to use the default encoding.
  *
  * If \a extra is not NULL it is expected to contain extraheaders, a
  * string containing (compact) JSON, that will be added to each output
@@ -1967,6 +1948,7 @@ mstl3_unpack_recordlist (MS3TraceID *id, MS3TraceSeg *seg, void *output,
  *
  * \ref MessageOnError - this function logs a message on error
  *
+ * \sa mstraceseg3_pack()
  * \sa msr3_pack()
  ***************************************************************************/
 int64_t
@@ -1975,17 +1957,13 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
             int64_t *packedsamples, uint32_t flags, int8_t verbose,
             char *extra)
 {
-  MS3Record *msr = NULL;
   MS3TraceID *id = NULL;
   MS3TraceSeg *seg = NULL;
 
   int64_t totalpackedrecords = 0;
   int64_t totalpackedsamples = 0;
-  int segpackedrecords = 0;
+  int64_t segpackedrecords = 0;
   int64_t segpackedsamples = 0;
-  int samplesize;
-  size_t bufsize;
-  size_t extralength;
 
   if (!mstl)
   {
@@ -2002,120 +1980,23 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
   if (packedsamples)
     *packedsamples = 0;
 
-  msr = msr3_init (NULL);
-
-  if (msr == NULL)
-  {
-    ms_log (2, "Error initializing msr, out of memory?\n");
-    return -1;
-  }
-
-  msr->reclen = reclen;
-  msr->encoding = encoding;
-
-  if (extra)
-  {
-    msr->extra = extra;
-    extralength = strlen(extra);
-
-    if (extralength > UINT16_MAX)
-    {
-      ms_log (2, "Extra headers are too long: %"PRIsize_t"\n", extralength);
-      return -1;
-    }
-
-    msr->extralength = (uint16_t)extralength;
-  }
-
   /* Loop through trace list */
   id = mstl->traces.next[0];
-  while (id)
+  while (id && totalpackedrecords >= 0)
   {
-    memcpy (msr->sid, id->sid, sizeof(msr->sid));
-    msr->pubversion = id->pubversion;
-
     /* Loop through segment list */
     seg = id->first;
     while (seg)
     {
-      msr->starttime = seg->starttime;
-      msr->samprate = seg->samprate;
-      msr->samplecnt = seg->samplecnt;
-      msr->datasamples = seg->datasamples;
-      msr->numsamples = seg->numsamples;
-      msr->sampletype = seg->sampletype;
+      segpackedrecords = mstraceseg3_pack (id, seg, record_handler, handlerdata,
+                                           reclen, encoding, &segpackedsamples, flags,
+                                           verbose, extra);
 
-      /* Set encoding for data types with only one encoding, otherwise requested */
-      switch (seg->sampletype)
+      if (segpackedrecords < 0)
       {
-      case 't':
-        msr->encoding = DE_TEXT;
+        ms_log (2, "%s: Error packing data from segment\n", id->sid);
+        totalpackedrecords = -1;
         break;
-      case 'f':
-        msr->encoding = DE_FLOAT32;
-        break;
-      case 'd':
-        msr->encoding = DE_FLOAT64;
-        break;
-      default:
-        msr->encoding = encoding;
-      }
-
-      segpackedsamples = 0;
-      segpackedrecords = msr3_pack (msr, record_handler, handlerdata, &segpackedsamples, flags, verbose);
-
-      if (verbose > 1)
-      {
-        ms_log (0, "Packed %d records for %s segment\n", segpackedrecords, msr->sid);
-      }
-
-      /* If MSF_MAINTAINMSTL not set, adjust segment start time and reduce data array and sample counts */
-      if (!(flags & MSF_MAINTAINMSTL) && segpackedsamples > 0)
-      {
-        /* Calculate new start time, shortcut when all samples have been packed */
-        if (segpackedsamples == seg->numsamples)
-          seg->starttime = seg->endtime;
-        else
-          seg->starttime = ms_sampletime (seg->starttime, segpackedsamples, seg->samprate);
-
-        if (!(samplesize = ms_samplesize (seg->sampletype)))
-        {
-          ms_log (2, "Unknown sample size for sample type: %c\n", seg->sampletype);
-          return -1;
-        }
-
-        bufsize = (seg->numsamples - segpackedsamples) * samplesize;
-
-        if (bufsize > 0)
-        {
-          memmove (seg->datasamples,
-                   (uint8_t *)seg->datasamples + (segpackedsamples * samplesize),
-                   bufsize);
-
-          /* Reallocate buffer for reduced size needed, only if not pre-allocating */
-          if (libmseed_prealloc_block_size == 0)
-          {
-            seg->datasamples = libmseed_memory.realloc (seg->datasamples, bufsize);
-
-            if (seg->datasamples == NULL)
-            {
-              ms_log (2, "Cannot (re)allocate datasamples buffer\n");
-              return -1;
-            }
-
-            seg->datasize = bufsize;
-          }
-        }
-        else
-        {
-          if (seg->datasamples)
-            libmseed_memory.free (seg->datasamples);
-          seg->datasamples = NULL;
-          seg->datasize = 0;
-        }
-
-        seg->samplecnt -= segpackedsamples;
-        seg->numsamples -= segpackedsamples;
       }
 
       totalpackedrecords += segpackedrecords;
@@ -2127,15 +2008,201 @@ mstl3_pack (MS3TraceList *mstl, void (*record_handler) (char *, int, void *),
     id = id->next[0];
   }
 
-  /* The record structure never owns the actual data so it should not free it */
-  msr->datasamples = NULL;
-  msr3_free (&msr);
-
   if (packedsamples)
     *packedsamples = totalpackedsamples;
 
   return totalpackedrecords;
 } /* End of mstl3_pack() */
+
+/**********************************************************************/ /**
+ * @brief Pack a ::MS3TraceSeg data into miniSEED records
+ *
+ * The datasamples array, numsamples and starttime fields of each
+ * trace segment will be adjusted as data are packed unless the
+ * ::MSF_MAINTAINMSTL flag is specified in \a flags. If
+ * ::MSF_MAINTAINMSTL is specified a caller would also normally set
+ * the ::MSF_FLUSHDATA flag to pack all data in the trace list.
+ *
+ * As each record is filled and finished they are passed to \a
+ * record_handler() which should expect 1) a \c char* to the record,
+ * 2) the length of the record and 3) a pointer supplied by the
+ * original caller containing optional private data (\a handlerdata).
+ * It is the responsibility of \a record_handler() to process the
+ * record, the memory will be re-used or freed when \a
+ * record_handler() returns.
+ *
+ * The requested \a encoding value is currently only used for integer
+ * data samples. The encoding is set automatially for text and
+ * floating point data samples as there is only a single encoding for
+ * them.  A value of \c -1 can be used to use the default encoding.
+ *
+ * If \a extra is not NULL it is expected to contain extraheaders, a
+ * string containing (compact) JSON, that will be added to each output
+ * record.
+ *
+ * @param[in] id ::MS3TraceID for the relevant ::MS3TraceSeg
+ * @param[in] seg ::MS3TraceSeg containing data to pack
+ * @param[in] record_handler() Callback function called for each record
+ * @param[in] handlerdata A pointer that will be provided to the \a record_handler()
+ * @param[in] reclen Maximum record length to create
+ * @param[in] encoding Encoding for data samples, see msr3_pack()
+ * @param[out] packedsamples The number of samples packed, returned to caller
+ * @param[in] flags Bit flags to control packing:
+ * @parblock
+ *  - \c ::MSF_FLUSHDATA : Pack all data in the buffer
+ *  - \c ::MSF_MAINTAINMSTL : Do not remove packe data from the buffer
+ *  - \c ::MSF_PACKVER2 : Pack miniSEED version 2 instead of default 3
+ * @endparblock
+ * @param[in] verbose Controls logging verbosity, 0 is no diagnostic output
+ * @param[in] extra If not NULL, add this buffer of extra headers to all records
+ *
+ * @returns the number of records created on success and -1 on error.
+ *
+ * \ref MessageOnError - this function logs a message on error
+ *
+ * \sa mstl3_pack()
+ * \sa msr3_pack()
+ ***************************************************************************/
+int64_t
+mstraceseg3_pack (MS3TraceID *id, MS3TraceSeg *seg,
+                  void (*record_handler) (char *, int, void *),
+                  void *handlerdata, int reclen, int8_t encoding,
+                  int64_t *packedsamples, uint32_t flags, int8_t verbose,
+                  char *extra)
+{
+  MS3Record msr = MS3Record_INITIALIZER;
+
+  int64_t totalpackedrecords = 0;
+  int64_t totalpackedsamples = 0;
+  int segpackedrecords = 0;
+  int64_t segpackedsamples = 0;
+  int samplesize;
+  size_t bufsize;
+  size_t extralength;
+
+  if (!id || !seg)
+  {
+    ms_log (2, "%s(): Required input not defined: 'id' or 'seg'\n", __func__);
+    return -1;
+  }
+
+  if (!record_handler)
+  {
+    ms_log (2, "callback record_handler() function pointer not set!\n");
+    return -1;
+  }
+
+  if (packedsamples)
+    *packedsamples = 0;
+
+  msr.reclen = reclen;
+  msr.encoding = encoding;
+  memcpy (msr.sid, id->sid, sizeof(msr.sid));
+  msr.pubversion = id->pubversion;
+
+  if (extra)
+  {
+    msr.extra = extra;
+    extralength = strlen(extra);
+
+    if (extralength > UINT16_MAX)
+    {
+      ms_log (2, "Extra headers are too long: %"PRIsize_t"\n", extralength);
+      return -1;
+    }
+
+    msr.extralength = (uint16_t)extralength;
+  }
+
+  /* Pack segment data */
+  msr.starttime   = seg->starttime;
+  msr.samprate    = seg->samprate;
+  msr.samplecnt   = seg->samplecnt;
+  msr.datasamples = seg->datasamples;
+  msr.numsamples  = seg->numsamples;
+  msr.sampletype  = seg->sampletype;
+
+  /* Set encoding for data types with only one encoding, otherwise requested */
+  switch (seg->sampletype)
+  {
+  case 't':
+    msr.encoding = DE_TEXT;
+    break;
+  case 'f':
+    msr.encoding = DE_FLOAT32;
+    break;
+  case 'd':
+    msr.encoding = DE_FLOAT64;
+    break;
+  default:
+    msr.encoding = encoding;
+  }
+
+  segpackedsamples = 0;
+  segpackedrecords = msr3_pack (&msr, record_handler, handlerdata, &segpackedsamples, flags, verbose);
+
+  if (verbose > 1)
+  {
+    ms_log (0, "Packed %d records for %s segment\n", segpackedrecords, msr.sid);
+  }
+
+  /* If MSF_MAINTAINMSTL not set, adjust segment start time and reduce data array and sample counts */
+  if (!(flags & MSF_MAINTAINMSTL) && segpackedsamples > 0)
+  {
+    /* Calculate new start time, shortcut when all samples have been packed */
+    if (segpackedsamples == seg->numsamples)
+      seg->starttime = seg->endtime;
+    else
+      seg->starttime = ms_sampletime (seg->starttime, segpackedsamples, seg->samprate);
+
+    if (!(samplesize = ms_samplesize (seg->sampletype)))
+    {
+      ms_log (2, "Unknown sample size for sample type: %c\n", seg->sampletype);
+      return -1;
+    }
+
+    bufsize = (seg->numsamples - segpackedsamples) * samplesize;
+
+    if (bufsize > 0)
+    {
+      memmove (seg->datasamples,
+               (uint8_t *)seg->datasamples + (segpackedsamples * samplesize),
+               bufsize);
+
+      /* Reallocate buffer for reduced size needed, only if not pre-allocating */
+      if (libmseed_prealloc_block_size == 0)
+      {
+        seg->datasamples = libmseed_memory.realloc (seg->datasamples, bufsize);
+
+        if (seg->datasamples == NULL)
+        {
+          ms_log (2, "Cannot (re)allocate datasamples buffer\n");
+          return -1;
+        }
+
+        seg->datasize = bufsize;
+      }
+    }
+    else
+    {
+      if (seg->datasamples)
+        libmseed_memory.free (seg->datasamples);
+      seg->datasamples = NULL;
+      seg->datasize    = 0;
+    }
+
+    seg->samplecnt -= segpackedsamples;
+    seg->numsamples -= segpackedsamples;
+  }
+
+  totalpackedrecords += segpackedrecords;
+  totalpackedsamples += segpackedsamples;
+
+  if (packedsamples)
+    *packedsamples = totalpackedsamples;
+
+  return totalpackedrecords;
+} /* End of mstraceseg3_pack() */
 
 /**********************************************************************/ /**
  * @brief Print trace list summary information for a ::MS3TraceList
@@ -2319,7 +2386,8 @@ mstl3_printsynclist (const MS3TraceList *mstl, const char *dccid, ms_subseconds_
   id = mstl->traces.next[0];
   while (id)
   {
-    ms_sid2nslc (id->sid, net, sta, loc, chan);
+    ms_sid2nslc_n (id->sid, net, sizeof (net), sta, sizeof (sta),
+                   loc, sizeof (loc), chan, sizeof (chan));
 
     /* Loop through segment list */
     seg = id->first;
@@ -2417,7 +2485,7 @@ mstl3_printgaplist (const MS3TraceList *mstl, ms_timeformat_t timeformat,
 
       if (printflag)
       {
-        nsamples = ms_dabs (gap) * seg->samprate;
+        nsamples = fabs (gap) * seg->samprate;
 
         if (gap > 0.0)
           nsamples -= 1.0;

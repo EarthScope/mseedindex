@@ -114,7 +114,7 @@
 #include "md5.h"
 #include "sha256.h"
 
-#define VERSION "3.0.5"
+#define VERSION "3.0.6"
 #define PACKAGE "mseedindex"
 
 static flag verbose = 0;
@@ -795,7 +795,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
               char channel[11];
 
               /* Parse NSLC components from source ID */
-              if (ms_sid2nslc (secid->sid, network, station, location, channel))
+              if (ms_sid2nslc_n (secid->sid, network, sizeof (network), station, sizeof (station),
+                                 location, sizeof (location), channel, sizeof (channel)))
               {
                 if (filewhere)
                   free (filewhere);
@@ -862,7 +863,8 @@ SyncPostgresFileSeries (PGconn *dbconn, struct filelink *flp)
     char secchannel[11];
 
     /* Parse NSLC components from source ID */
-    if (ms_sid2nslc (secid->sid, secnetwork, secstation, seclocation, secchannel))
+    if (ms_sid2nslc_n (secid->sid, secnetwork, sizeof (secnetwork), secstation, sizeof (secstation),
+                       seclocation, sizeof (seclocation), secchannel, sizeof (secchannel)))
     {
       return -1;
     }
@@ -1407,7 +1409,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
               char channel[11];
 
               /* Parse NSLC components from source ID */
-              if (ms_sid2nslc (secid->sid, network, station, location, channel))
+              if (ms_sid2nslc_n (secid->sid, network, sizeof (network), station, sizeof (station),
+                                 location, sizeof (location), channel, sizeof (channel)))
               {
                 if (filewhere)
                   free (filewhere);
@@ -1493,7 +1496,8 @@ SyncSQLiteFileSeries (sqlite3 *dbconn, struct filelink *flp)
     char secchannel[11];
 
     /* Parse NSLC components from source ID */
-    if (ms_sid2nslc (secid->sid, secnetwork, secstation, seclocation, secchannel))
+    if (ms_sid2nslc_n (secid->sid, secnetwork, sizeof (secnetwork), secstation, sizeof (secstation),
+                       seclocation, sizeof (seclocation), secchannel, sizeof (secchannel)))
     {
       return -1;
     }

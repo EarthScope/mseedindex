@@ -1,3 +1,7 @@
+2025.160:
+	- Add GitHub workflow to build and publish to PyPI
+	- Update sqlite to v3.50.1
+
 2025.114: 3.0.6
 	- Update libmseed to v3.1.5.
 

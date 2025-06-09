@@ -24,7 +24,7 @@ class CustomBuildHook(BuildHookInterface):
         if sys.platform.lower().startswith("win"):
             cmd = f"nmake /f Makefile.win"
         else:
-            cmd = f"CFLAGS='-O3' make -j"
+            cmd = f"CFLAGS='-O2' make -j"
 
         subprocess.check_call(cmd, cwd=self.package_root, shell=True)
 

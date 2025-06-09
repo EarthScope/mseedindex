@@ -38,3 +38,12 @@ dev/
 TODO
 *.mseed
 
+# Virtual environments
+venv/
+env/
+.env
+.venv
+ENV/
+env.bak/
+venv.bak/
+

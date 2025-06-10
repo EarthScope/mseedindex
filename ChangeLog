@@ -1,4 +1,4 @@
-2025.160:
+2025.160: 3.0.7
 	- Add GitHub workflow to build and publish to PyPI
 	- Update sqlite to v3.50.1
 

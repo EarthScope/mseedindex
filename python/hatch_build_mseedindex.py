@@ -30,6 +30,7 @@ class CustomBuildHook(BuildHookInterface):
 
         subprocess.check_call(cmd, cwd=self.package_root, shell=True)
 
+        # Add the binary to the force_include list
         build_data["force_include"][binary_name] = f"mseedindex/{binary_name}"
 
     def clean(self, versions):

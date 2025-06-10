@@ -1,7 +1,6 @@
 # A Python wrapper for PyPI packaging entry point
 import subprocess
 import sys
-import platform
 from pathlib import Path
 
 def main():

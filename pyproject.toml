@@ -51,5 +51,4 @@ exclude = ['libmseed']
 packages = ["mseedindex"]
 
 [tool.hatch.build.targets.wheel.force-include]
-"mseedindex" = "mseedindex/mseedindex"
 "python/__main__.py" = "mseedindex/__main__.py"

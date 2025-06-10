@@ -23,10 +23,14 @@ class CustomBuildHook(BuildHookInterface):
 
         if sys.platform.lower().startswith("win"):
             cmd = f"nmake /f Makefile.win"
+            binary_name = "mseedindex.exe"
         else:
             cmd = f"CFLAGS='-O2' make -j"
+            binary_name = "mseedindex"
 
         subprocess.check_call(cmd, cwd=self.package_root, shell=True)
+
+        build_data["force_include"][binary_name] = f"mseedindex/{binary_name}"
 
     def clean(self, versions):
         if sys.platform.lower().startswith("win"):

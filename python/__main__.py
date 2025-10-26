@@ -1,15 +1,10 @@
 # A Python wrapper for PyPI packaging entry point
-import subprocess
+import subprocess 
 import sys
-from pathlib import Path
+
+from mseedindex import get_path_to_binary
 
 def main():
-    if sys.platform.lower().startswith("win"):
-        binary_name = "mseedindex.exe"
-    else:
-        binary_name = "mseedindex"
-
-    binary_path = Path(__file__).parent / binary_name
-
+    binary_path = get_path_to_binary()
     result = subprocess.run([str(binary_path)] + sys.argv[1:])
     sys.exit(result.returncode)

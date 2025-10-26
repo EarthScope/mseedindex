@@ -52,3 +52,4 @@ packages = ["mseedindex"]
 
 [tool.hatch.build.targets.wheel.force-include]
 "python/__main__.py" = "mseedindex/__main__.py"
+"python/__init__.py" = "mseedindex/__init__.py"

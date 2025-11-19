@@ -451,7 +451,7 @@ main (int argc, char **argv)
   {
     md5_byte_t digest[16];
 
-    secid = filelist->mstl->traces.next[0];
+    secid = flp->mstl->traces.next[0];
     while (secid)
     {
       if ((sd = (struct sectiondetails *)secid->prvtptr))
